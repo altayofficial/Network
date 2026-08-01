@@ -37,6 +37,7 @@ use altay\network\transport\TransportException;
 use altay\network\transport\TransportListener;
 use altay\network\utils\Uint64;
 use React\EventLoop\Loop;
+use function React\Promise\set_rejection_handler;
 use Webrtc\DataChannel\RTCDataChannel;
 use Webrtc\ICE\RTCIceCandidate;
 use Webrtc\SDP\RTCSessionDescription;
@@ -122,6 +123,11 @@ final class NetherNetTransport implements NameableTransport{
 		$this->socket = $socket;
 		$this->listener = $listener;
 		$this->identity = ServerIdentity::generate();
+
+		set_rejection_handler(function(\Throwable $reason) : void{
+			$this->logger->debug("Ignoring unhandled WebRTC promise rejection: " . $reason->getMessage());
+		});
+
 		$this->logger->info("NetherNet transport listening for discovery on $this->bindAddress:$this->port (network ID $this->networkId)");
 	}
 
@@ -202,10 +208,23 @@ final class NetherNetTransport implements NameableTransport{
 			}
 		}
 		$this->pending = [];
+
+		//flush the teardown ticks the closes above scheduled (SCTP stream resets, DTLS close);
+		//stray rejections during this are swallowed by the rejection handler set in start()
+		Loop::futureTick(static function() : void{
+			Loop::stop();
+		});
+		try{
+			Loop::run();
+		}catch(\Throwable $e){
+			$this->logger->debug("Error while draining WebRTC loop on shutdown: " . $e->getMessage());
+		}
+
 		if($this->socket !== null){
 			socket_close($this->socket);
 			$this->socket = null;
 		}
+		set_rejection_handler(null);
 		$this->listener = null;
 	}
 
@@ -225,7 +244,6 @@ final class NetherNetTransport implements NameableTransport{
 		}
 
 		if($packet instanceof DiscoveryRequestPacket){
-			$this->logger->debug("Discovery request from $address:$port (network ID $senderId)");
 			$response = DiscoveryCodec::marshal(new DiscoveryResponsePacket($this->serverData->encode()), $this->networkId);
 			$this->sendDatagram($response, $address, $port);
 		}elseif($packet instanceof DiscoveryMessagePacket){
@@ -286,7 +304,7 @@ final class NetherNetTransport implements NameableTransport{
 			$this->logger->error("Failed to create peer connection: " . $e->getMessage());
 			return;
 		}
-		$this->logger->info("Incoming NetherNet connection $connectionId from $address:$port (network ID $senderNetworkId)");
+		$this->logger->debug("Incoming NetherNet connection $connectionId from $address:$port (network ID $senderNetworkId)");
 		$this->pending[$connectionId] = [
 			"connection" => $connection,
 			"networkId" => $senderNetworkId,
@@ -365,10 +383,9 @@ final class NetherNetTransport implements NameableTransport{
 		$session->bindChannel($channel);
 
 		if($channel->getLabel() === NetherNetSession::RELIABLE_CHANNEL){
-			$notifyOpen = function() use ($connectionId, $sessionId) : void{
+			$notifyOpen = function() use ($sessionId) : void{
 				$session = $this->sessions[$sessionId] ?? null;
 				if($session !== null && $session->markOpenNotified()){
-					$this->logger->info("NetherNet session $connectionId opened");
 					$this->listener?->onSessionOpen($this, $session);
 				}
 			};
