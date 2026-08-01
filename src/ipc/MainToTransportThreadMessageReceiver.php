@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace altay\network\ipc;
 
+use altay\network\transport\AddressBlockingTransport;
+use altay\network\transport\NameableTransport;
+use altay\network\transport\RawPacketTransport;
 use altay\network\transport\Transport;
+use altay\network\transport\TunableTransport;
 use pocketmine\utils\Binary;
-use function method_exists;
 
 final class MainToTransportThreadMessageReceiver{
 
@@ -50,32 +53,32 @@ final class MainToTransportThreadMessageReceiver{
 				$this->shutdownRequested = true;
 				break;
 			case TransportCommandId::SET_NAME:
-				if(method_exists($transport, "setName")){
+				if($transport instanceof NameableTransport){
 					$transport->setName(substr($message, $offset));
 				}
 				break;
 			case TransportCommandId::BLOCK_ADDRESS:
-				if(method_exists($transport, "blockAddress")){
+				if($transport instanceof AddressBlockingTransport){
 					$transport->blockAddress(substr($message, $offset + 4), Binary::readLInt(substr($message, $offset, 4)));
 				}
 				break;
 			case TransportCommandId::UNBLOCK_ADDRESS:
-				if(method_exists($transport, "unblockAddress")){
+				if($transport instanceof AddressBlockingTransport){
 					$transport->unblockAddress(substr($message, $offset));
 				}
 				break;
 			case TransportCommandId::SET_PORT_CHECK:
-				if(method_exists($transport, "setPortCheck")){
+				if($transport instanceof TunableTransport){
 					$transport->setPortCheck(ord($message[$offset]) !== 0);
 				}
 				break;
 			case TransportCommandId::SET_PACKET_LIMIT:
-				if(method_exists($transport, "setPacketsPerTickLimit")){
+				if($transport instanceof TunableTransport){
 					$transport->setPacketsPerTickLimit(Binary::readLInt(substr($message, $offset, 4)));
 				}
 				break;
 			case TransportCommandId::ADD_RAW_PACKET_FILTER:
-				if(method_exists($transport, "addRawPacketFilter")){
+				if($transport instanceof RawPacketTransport){
 					$transport->addRawPacketFilter(substr($message, $offset));
 				}
 				break;
@@ -84,7 +87,7 @@ final class MainToTransportThreadMessageReceiver{
 				$address = substr($message, $offset, $addressLength);
 				$offset += $addressLength;
 				$port = Binary::readLShort(substr($message, $offset, 2));
-				if(method_exists($transport, "sendRaw")){
+				if($transport instanceof RawPacketTransport){
 					$transport->sendRaw($address, $port, substr($message, $offset + 2));
 				}
 				break;

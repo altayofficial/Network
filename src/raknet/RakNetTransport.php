@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace altay\network\raknet;
 
-use altay\network\transport\Transport;
+use altay\network\transport\AddressBlockingTransport;
+use altay\network\transport\NameableTransport;
+use altay\network\transport\RawPacketTransport;
 use altay\network\transport\TransportException;
 use altay\network\transport\TransportListener;
+use altay\network\transport\TunableTransport;
 use altay\network\raknet\generic\SocketException;
 use altay\network\raknet\server\Server;
 use altay\network\raknet\server\ServerSocket;
@@ -14,7 +17,7 @@ use altay\network\raknet\server\SimpleProtocolAcceptor;
 use altay\network\raknet\utils\ExceptionTraceCleaner;
 use altay\network\raknet\utils\InternetAddress;
 
-final class RakNetTransport implements Transport{
+final class RakNetTransport implements NameableTransport, RawPacketTransport, AddressBlockingTransport, TunableTransport{
 
 	public const BEDROCK_RAKNET_PROTOCOL_VERSION = 11;
 

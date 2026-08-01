@@ -11,7 +11,7 @@ use altay\network\nethernet\discovery\DiscoveryResponsePacket;
 use altay\network\nethernet\auth\ClientIdentityAssertion;
 use altay\network\nethernet\auth\IdentityException;
 use altay\network\nethernet\auth\ServerIdentity;
-use altay\network\transport\Transport;
+use altay\network\transport\NameableTransport;
 use altay\network\transport\TransportException;
 use altay\network\transport\TransportListener;
 use altay\network\utils\Uint64;
@@ -21,7 +21,7 @@ use Webrtc\ICE\RTCIceCandidate;
 use Webrtc\SDP\RTCSessionDescription;
 use Webrtc\Webrtc\RTCPeerConnection;
 
-final class NetherNetTransport implements Transport{
+final class NetherNetTransport implements NameableTransport{
 
 	public const DISCOVERY_PORT = 7551;
 
@@ -58,6 +58,11 @@ final class NetherNetTransport implements Transport{
 
 	public function getServerData() : ServerData{
 		return $this->serverData;
+	}
+
+	public function getServerId() : ?int{
+		//NetherNet identifies servers by their network ID, it has no separate RakNet-style server GUID
+		return null;
 	}
 
 	public function setName(string $name) : void{
