@@ -27,7 +27,8 @@ final class RakNetTransport implements Transport{
 		private int $port = 19132,
 		private bool $ipv6 = false,
 		private int $maxMtuSize = 1492,
-		private int $protocolVersion = self::BEDROCK_RAKNET_PROTOCOL_VERSION
+		private int $protocolVersion = self::BEDROCK_RAKNET_PROTOCOL_VERSION,
+		private ?int $serverId = null
 	){}
 
 	public function getName() : string{
@@ -46,7 +47,7 @@ final class RakNetTransport implements Transport{
 			throw new TransportException("Failed to start RakNet transport: " . $e->getMessage(), 0, $e);
 		}
 		$this->server = new Server(
-			mt_rand(0, PHP_INT_MAX),
+			$this->serverId ?? mt_rand(0, PHP_INT_MAX),
 			$this->logger,
 			$socket,
 			$this->maxMtuSize,
@@ -60,6 +61,10 @@ final class RakNetTransport implements Transport{
 
 	public function tick() : void{
 		$this->server?->tickProcessor();
+	}
+
+	public function isSelfPacing() : bool{
+		return true;
 	}
 
 	public function isRunning() : bool{
@@ -76,6 +81,10 @@ final class RakNetTransport implements Transport{
 
 	public function getSession(int $sessionId) : ?RakNetSession{
 		return $this->eventListener?->getSession($sessionId);
+	}
+
+	public function getServerId() : ?int{
+		return $this->server?->getID();
 	}
 
 	public function setName(string $name) : void{
@@ -96,5 +105,13 @@ final class RakNetTransport implements Transport{
 
 	public function setPortCheck(bool $value) : void{
 		$this->server?->setPortCheck($value);
+	}
+
+	public function setPacketsPerTickLimit(int $limit) : void{
+		$this->server?->setPacketsPerTickLimit($limit);
+	}
+
+	public function addRawPacketFilter(string $regex) : void{
+		$this->server?->addRawPacketFilter($regex);
 	}
 }

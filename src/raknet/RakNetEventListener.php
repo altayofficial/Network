@@ -59,14 +59,21 @@ final class RakNetEventListener implements ServerEventListener{
 	}
 
 	public function onPacketAck(int $sessionId, int $identifierACK) : void{
-
+		$session = $this->sessions[$sessionId] ?? null;
+		if($session !== null){
+			$this->listener->onPacketAck($this->transport, $session, $identifierACK);
+		}
 	}
 
 	public function onBandwidthStatsUpdate(int $bytesSentDiff, int $bytesReceivedDiff) : void{
-
+		$this->listener->onBandwidthUpdate($this->transport, $bytesSentDiff, $bytesReceivedDiff);
 	}
 
 	public function onPingMeasure(int $sessionId, int $pingMS) : void{
-		$this->sessions[$sessionId]?->updatePing($pingMS);
+		$session = $this->sessions[$sessionId] ?? null;
+		if($session !== null){
+			$session->updatePing($pingMS);
+			$this->listener->onPingUpdate($this->transport, $session, $pingMS);
+		}
 	}
 }

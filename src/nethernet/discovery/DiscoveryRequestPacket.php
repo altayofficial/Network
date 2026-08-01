@@ -15,10 +15,10 @@ final class DiscoveryRequestPacket extends DiscoveryPacket{
 	}
 
 	public function encodePayload(BinaryStream $out) : void{
-
+        // pretty empty packet
 	}
 
 	public function decodePayload(BinaryStream $in) : void{
-
+        // pretty empty packet
 	}
 }

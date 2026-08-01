@@ -23,13 +23,13 @@ final class ServerData{
 		public string $serverName = "Altay",
 		public string $levelName = "Altay Server",
 		public int $gameType = self::GAME_TYPE_SURVIVAL,
-		public int $playerCount = 1,
+		public int $playerCount = 0,
 		public int $maxPlayerCount = 20,
 		public bool $editorWorld = false,
 		public bool $hardcore = false,
 		public bool $acceptsOnlineAuth = false,
 		public bool $acceptsSelfSignedAuth = true,
-		public int $transportLayer = self::TRANSPORT_LAYER_NETHERNET,
+		public int $transportLayer = self::TRANSPORT_LAYER_NETHERNET, // wtf? mojang
 		public int $connectionType = self::CONNECTION_TYPE_LAN_SIGNALING
 	){}
 

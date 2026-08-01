@@ -14,9 +14,11 @@ interface TransportSession{
 
 	public function getPing() : int;
 
+	public function getAuthenticatedPublicKey() : ?string;
+
 	public function isConnected() : bool;
 
-	public function sendPacket(string $payload, bool $immediate = false) : void;
+	public function sendPacket(string $payload, bool $immediate = false, ?int $receiptId = null) : void;
 
 	public function disconnect() : void;
 }

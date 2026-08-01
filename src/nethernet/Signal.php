@@ -13,16 +13,16 @@ final class Signal{
 
 	public function __construct(
 		public string $type,
-		public int $connectionId,
+		public string $connectionId,
 		public string $data
 	){}
 
 	public static function fromString(string $str) : ?self{
 		$parts = explode(" ", $str, 3);
-		if(count($parts) !== 3 || !ctype_digit($parts[1])){
+		if(count($parts) !== 3 || !ctype_digit($parts[1]) || strlen($parts[1]) > 20){
 			return null;
 		}
-		return new self($parts[0], (int) $parts[1], $parts[2]);
+		return new self($parts[0], $parts[1], $parts[2]);
 	}
 
 	public function __toString() : string{

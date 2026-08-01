@@ -8,9 +8,13 @@ use altay\network\nethernet\discovery\DiscoveryCodec;
 use altay\network\nethernet\discovery\DiscoveryMessagePacket;
 use altay\network\nethernet\discovery\DiscoveryRequestPacket;
 use altay\network\nethernet\discovery\DiscoveryResponsePacket;
+use altay\network\nethernet\auth\ClientIdentityAssertion;
+use altay\network\nethernet\auth\IdentityException;
+use altay\network\nethernet\auth\ServerIdentity;
 use altay\network\transport\Transport;
 use altay\network\transport\TransportException;
 use altay\network\transport\TransportListener;
+use altay\network\utils\Uint64;
 use React\EventLoop\Loop;
 use Webrtc\DataChannel\RTCDataChannel;
 use Webrtc\ICE\RTCIceCandidate;
@@ -21,20 +25,27 @@ final class NetherNetTransport implements Transport{
 
 	public const DISCOVERY_PORT = 7551;
 
+	private const PENDING_NEGOTIATION_TIMEOUT = 15;
+	private const MAINTENANCE_INTERVAL = 1;
+
 	private ?\Socket $socket = null;
 	private ?TransportListener $listener = null;
+	private ?ServerIdentity $identity = null;
 
-	/** @var array<int, array{connection: RTCPeerConnection, networkId: int, address: string, port: int}> */
+	/** @var array<string, array{connection: RTCPeerConnection, networkId: int, address: string, port: int, publicKey: ?string, createdAt: int}> */
 	private array $pending = [];
 	/** @var NetherNetSession[] */
 	private array $sessions = [];
+
+	private int $lastMaintenance = 0;
 
 	public function __construct(
 		private \Logger $logger,
 		private int $networkId,
 		private ServerData $serverData,
 		private string $bindAddress = "0.0.0.0",
-		private int $port = self::DISCOVERY_PORT
+		private int $port = self::DISCOVERY_PORT,
+		private bool $requireIdentity = false
 	){}
 
 	public function getName() : string{
@@ -47,6 +58,23 @@ final class NetherNetTransport implements Transport{
 
 	public function getServerData() : ServerData{
 		return $this->serverData;
+	}
+
+	public function setName(string $name) : void{
+		$parts = explode(";", $name);
+		if(count($parts) < 9 || $parts[0] !== "MCPE"){
+			$this->serverData->serverName = $name;
+			return;
+		}
+		$this->serverData->serverName = $parts[1];
+		$this->serverData->levelName = $parts[7];
+		$this->serverData->playerCount = (int) $parts[4];
+		$this->serverData->maxPlayerCount = (int) $parts[5];
+		$this->serverData->gameType = match($parts[8]){
+			"Creative" => ServerData::GAME_TYPE_CREATIVE,
+			"Adventure" => ServerData::GAME_TYPE_ADVENTURE,
+			default => ServerData::GAME_TYPE_SURVIVAL
+		};
 	}
 
 	public function start(TransportListener $listener) : void{
@@ -67,6 +95,7 @@ final class NetherNetTransport implements Transport{
 		socket_set_nonblock($socket);
 		$this->socket = $socket;
 		$this->listener = $listener;
+		$this->identity = ServerIdentity::generate();
 		$this->logger->info("NetherNet transport listening for discovery on $this->bindAddress:$this->port (network ID $this->networkId)");
 	}
 
@@ -88,7 +117,46 @@ final class NetherNetTransport implements Transport{
 		Loop::futureTick(static function() : void{
 			Loop::stop();
 		});
-		Loop::run();
+		try{
+			Loop::run();
+		}catch(\Throwable $e){
+			//an unhandled promise rejection from a dying peer connection must not kill the whole transport
+			$this->logger->error("Error while running WebRTC event loop: " . $e->getMessage());
+		}
+
+		$now = time();
+		if($now - $this->lastMaintenance >= self::MAINTENANCE_INTERVAL){
+			$this->lastMaintenance = $now;
+			$this->expireStalePending($now);
+			$this->reportBandwidth();
+		}
+	}
+
+	private function expireStalePending(int $now) : void{
+		foreach($this->pending as $connectionId => $entry){
+			if($now - $entry["createdAt"] >= self::PENDING_NEGOTIATION_TIMEOUT){
+				$this->logger->debug("Dropping stale pending negotiation $connectionId from " . $entry["address"] . ":" . $entry["port"]);
+				$this->dropConnection($connectionId, "negotiation timed out");
+			}
+		}
+	}
+
+	private function reportBandwidth() : void{
+		$sent = 0;
+		$received = 0;
+		foreach($this->sessions as $session){
+			[$sessionSent, $sessionReceived] = $session->collectBandwidthDelta();
+			$sent += $sessionSent;
+			$received += $sessionReceived;
+		}
+		if(($sent !== 0 || $received !== 0) && $this->listener !== null){
+			$this->listener->onBandwidthUpdate($this, $sent, $received);
+		}
+	}
+
+	public function isSelfPacing() : bool{
+		//the UDP socket is non-blocking and the React loop returns immediately, so the driving loop must pace this
+		return false;
 	}
 
 	public function isRunning() : bool{
@@ -122,6 +190,7 @@ final class NetherNetTransport implements Transport{
 	private function handleDatagram(string $buffer, string $address, int $port) : void{
 		$result = DiscoveryCodec::unmarshal($buffer);
 		if($result === null){
+			$this->logger->debug("Ignoring invalid discovery datagram from $address:$port (" . strlen($buffer) . " bytes)");
 			return;
 		}
 		[$packet, $senderId] = $result;
@@ -130,13 +199,21 @@ final class NetherNetTransport implements Transport{
 		}
 
 		if($packet instanceof DiscoveryRequestPacket){
+			$this->logger->debug("Discovery request from $address:$port (network ID $senderId)");
 			$response = DiscoveryCodec::marshal(new DiscoveryResponsePacket($this->serverData->encode()), $this->networkId);
 			$this->sendDatagram($response, $address, $port);
-		}elseif($packet instanceof DiscoveryMessagePacket && $packet->recipientId === $this->networkId){
-			$signal = Signal::fromString($packet->data);
-			if($signal !== null){
-				$this->handleSignal($signal, $senderId, $address, $port);
+		}elseif($packet instanceof DiscoveryMessagePacket){
+			if($packet->recipientId !== $this->networkId){
+				$this->logger->debug("Ignoring discovery message from $address:$port intended for network " . $packet->recipientId);
+				return;
 			}
+			$signal = Signal::fromString($packet->data);
+			if($signal === null){
+				$this->logger->debug("Invalid signal from $address:$port: " . substr($packet->data, 0, 64));
+				return;
+			}
+			$this->logger->debug("Signal " . $signal->type . " from $address:$port (connection " . $signal->connectionId . ")");
+			$this->handleSignal($signal, $senderId, $address, $port);
 		}
 	}
 
@@ -156,7 +233,24 @@ final class NetherNetTransport implements Transport{
 
 	private function handleOffer(Signal $signal, int $senderNetworkId, string $address, int $port) : void{
 		$connectionId = $signal->connectionId;
-		if(isset($this->pending[$connectionId]) || isset($this->sessions[$connectionId])){
+		try{
+			$sessionId = Uint64::toSignedInt($connectionId);
+		}catch(\InvalidArgumentException){
+			return;
+		}
+		if(isset($this->pending[$connectionId]) || isset($this->sessions[$sessionId])){
+			return;
+		}
+
+		try{
+			$assertion = ClientIdentityAssertion::fromSdp($signal->data);
+			$assertion?->verify($signal->data);
+		}catch(IdentityException $e){
+			$this->logger->info("Rejecting connection $connectionId from $address:$port: invalid identity assertion: " . $e->getMessage());
+			return;
+		}
+		if($assertion === null && $this->requireIdentity){
+			$this->logger->info("Rejecting connection $connectionId from $address:$port: identity assertion required but not provided");
 			return;
 		}
 
@@ -166,15 +260,18 @@ final class NetherNetTransport implements Transport{
 			$this->logger->error("Failed to create peer connection: " . $e->getMessage());
 			return;
 		}
+		$this->logger->info("Incoming NetherNet connection $connectionId from $address:$port (network ID $senderNetworkId)");
 		$this->pending[$connectionId] = [
 			"connection" => $connection,
 			"networkId" => $senderNetworkId,
 			"address" => $address,
-			"port" => $port
+			"port" => $port,
+			"publicKey" => $assertion?->getPublicKeyBase64(),
+			"createdAt" => time()
 		];
 
-		$connection->on("datachannel", function(RTCDataChannel $channel) use ($connectionId, $address, $port, $connection) : void{
-			$this->handleDataChannel($connection, $channel, $connectionId, $address, $port);
+		$connection->on("datachannel", function(RTCDataChannel $channel) use ($connectionId, $sessionId, $address, $port, $connection) : void{
+			$this->handleDataChannel($connection, $channel, $connectionId, $sessionId, $address, $port);
 		});
 
 		$connection->setRemoteDescription(new RTCSessionDescription($signal->data, "offer"))
@@ -186,7 +283,8 @@ final class NetherNetTransport implements Transport{
 					$this->dropConnection($connectionId, "no local description");
 					return;
 				}
-				$this->sendSignal(new Signal(Signal::TYPE_ANSWER, $connectionId, $local->getSdp()), $senderNetworkId, $address, $port);
+				$this->logger->debug("Sending answer for connection $connectionId");
+				$this->sendSignal(new Signal(Signal::TYPE_ANSWER, $connectionId, $this->withIdentityAttribute($local->getSdp())), $senderNetworkId, $address, $port);
 				foreach($this->extractCandidates($local->getSdp()) as $candidate){
 					$this->sendSignal(new Signal(Signal::TYPE_CANDIDATE, $connectionId, $candidate), $senderNetworkId, $address, $port);
 				}
@@ -209,49 +307,64 @@ final class NetherNetTransport implements Transport{
 		}
 	}
 
-	private function handleDataChannel(RTCPeerConnection $connection, RTCDataChannel $channel, int $connectionId, string $address, int $port) : void{
-		$session = $this->sessions[$connectionId] ?? null;
+	private function handleDataChannel(RTCPeerConnection $connection, RTCDataChannel $channel, string $connectionId, int $sessionId, string $address, int $port) : void{
+		$session = $this->sessions[$sessionId] ?? null;
 		if($session === null){
 			$session = new NetherNetSession(
 				$connection,
-				$connectionId,
+				$sessionId,
 				$address,
 				$port,
-				function(string $payload) use ($connectionId) : void{
-					$session = $this->sessions[$connectionId] ?? null;
+				function(string $payload) use ($sessionId) : void{
+					$session = $this->sessions[$sessionId] ?? null;
 					if($session !== null){
 						$this->listener?->onPacketReceive($this, $session, $payload);
 					}
 				},
-				function() use ($connectionId) : void{
-					$this->closeSession($connectionId, "channel closed");
+				function() use ($sessionId) : void{
+					$this->closeSession($sessionId, "channel closed");
+				},
+				function(int $receiptId) use ($sessionId) : void{
+					$session = $this->sessions[$sessionId] ?? null;
+					if($session !== null){
+						$this->listener?->onPacketAck($this, $session, $receiptId);
+					}
 				}
 			);
-			$this->sessions[$connectionId] = $session;
+			$session->setAuthenticatedPublicKey($this->pending[$connectionId]["publicKey"] ?? null);
+			$this->sessions[$sessionId] = $session;
 			unset($this->pending[$connectionId]);
 		}
+		$this->logger->debug("Data channel \"" . $channel->getLabel() . "\" received for connection $connectionId");
 		$session->bindChannel($channel);
 
 		if($channel->getLabel() === NetherNetSession::RELIABLE_CHANNEL){
-			$channel->on("open", function() use ($connectionId) : void{
-				$session = $this->sessions[$connectionId] ?? null;
-				if($session !== null){
+			$notifyOpen = function() use ($connectionId, $sessionId) : void{
+				$session = $this->sessions[$sessionId] ?? null;
+				if($session !== null && $session->markOpenNotified()){
+					$this->logger->info("NetherNet session $connectionId opened");
 					$this->listener?->onSessionOpen($this, $session);
 				}
-			});
+			};
+			//inbound channels may already be open by the time the datachannel event fires
+			if($session->isReady()){
+				$notifyOpen();
+			}else{
+				$channel->on("open", $notifyOpen);
+			}
 		}
 	}
 
-	private function closeSession(int $connectionId, string $reason) : void{
-		$session = $this->sessions[$connectionId] ?? null;
+	private function closeSession(int $sessionId, string $reason) : void{
+		$session = $this->sessions[$sessionId] ?? null;
 		if($session !== null){
-			unset($this->sessions[$connectionId]);
+			unset($this->sessions[$sessionId]);
 			$session->disconnect();
 			$this->listener?->onSessionClose($this, $session, $reason);
 		}
 	}
 
-	private function dropConnection(int $connectionId, string $reason) : void{
+	private function dropConnection(string $connectionId, string $reason) : void{
 		$entry = $this->pending[$connectionId] ?? null;
 		if($entry !== null){
 			unset($this->pending[$connectionId]);
@@ -261,7 +374,11 @@ final class NetherNetTransport implements Transport{
 
 			}
 		}
-		$this->closeSession($connectionId, $reason);
+		try{
+			$this->closeSession(Uint64::toSignedInt($connectionId), $reason);
+		}catch(\InvalidArgumentException){
+
+		}
 	}
 
 	private function sendSignal(Signal $signal, int $recipientNetworkId, string $address, int $port) : void{
@@ -273,6 +390,18 @@ final class NetherNetTransport implements Transport{
 		if($this->socket !== null){
 			@socket_sendto($this->socket, $datagram, strlen($datagram), 0, $address, $port);
 		}
+	}
+
+	private function withIdentityAttribute(string $sdp) : string{
+		$attribute = $this->identity?->createIdentityAttribute($sdp);
+		if($attribute === null){
+			return $sdp;
+		}
+		$position = strpos($sdp, "m=");
+		if($position === false){
+			return $sdp;
+		}
+		return substr($sdp, 0, $position) . "a=identity:$attribute\r\n" . substr($sdp, $position);
 	}
 
 	/**

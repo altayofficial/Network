@@ -7,14 +7,31 @@
     "php": "^8.1",
     "ext-sockets": "*",
     "ext-openssl": "*",
+    "ext-gmp": "*",
     "pocketmine/binaryutils": "^0.2.6",
     "pocketmine/log": "^0.4.0",
-    "quasarstream/webrtc": "^1.0",
     "react/event-loop": "^1.5"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^10.5",
+    "phpstan/phpstan": "^2.0",
+    "quasarstream/webrtc": "^1.0"
   },
   "autoload": {
     "psr-4": {
       "altay\\network\\": "src/"
     }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "altay\\network\\tests\\": "tests/"
+    }
+  },
+  "suggest": {
+    "quasarstream/webrtc": "Required for the NetherNet transport"
+  },
+  "scripts": {
+    "test": "phpunit",
+    "analyse": "phpstan analyse"
   }
 }

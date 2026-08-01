@@ -42,6 +42,10 @@ final class RakNetSession implements TransportSession{
 		return $this->ping;
 	}
 
+	public function getAuthenticatedPublicKey() : ?string{
+		return null;
+	}
+
 	public function updatePing(int $ping) : void{
 		$this->ping = $ping;
 	}
@@ -54,7 +58,7 @@ final class RakNetSession implements TransportSession{
 		$this->connected = false;
 	}
 
-	public function sendPacket(string $payload, bool $immediate = false) : void{
+	public function sendPacket(string $payload, bool $immediate = false, ?int $receiptId = null) : void{
 		if(!$this->connected){
 			return;
 		}
@@ -62,6 +66,7 @@ final class RakNetSession implements TransportSession{
 		$encapsulated->reliability = PacketReliability::RELIABLE_ORDERED;
 		$encapsulated->orderChannel = 0;
 		$encapsulated->buffer = $payload;
+		$encapsulated->identifierACK = $receiptId;
 		$this->server->sendEncapsulated($this->sessionId, $encapsulated, $immediate);
 	}
 

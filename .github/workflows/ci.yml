@@ -36,3 +36,9 @@ jobs:
             php -l "$file" > /dev/null || fail=1
           done < <(find src -name "*.php")
           exit $fail
+
+      - name: PHPStan
+        run: composer analyse
+
+      - name: PHPUnit
+        run: composer test

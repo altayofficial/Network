@@ -15,6 +15,10 @@ interface Transport{
 
 	public function tick() : void;
 
+	public function isSelfPacing() : bool;
+
+	public function getSession(int $sessionId) : ?TransportSession;
+
 	public function isRunning() : bool;
 
 	public function shutdown() : void;

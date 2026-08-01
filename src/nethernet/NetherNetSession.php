@@ -18,14 +18,21 @@ final class NetherNetSession implements TransportSession{
 	private const MAX_SEGMENTS = 256;
 
 	private bool $connected = true;
+	private bool $openNotified = false;
 	private string $receiveBuffer = "";
+	private ?string $authenticatedPublicKey = null;
 	private ?RTCDataChannel $reliableChannel = null;
 	private ?RTCDataChannel $unreliableChannel = null;
+
+	private int $bytesSent = 0;
+	private int $bytesReceived = 0;
 
 	/** @var \Closure(string) : void */
 	private \Closure $packetHandler;
 	/** @var \Closure() : void */
 	private \Closure $closeHandler;
+	/** @var \Closure(int) : void */
+	private \Closure $ackHandler;
 
 	public function __construct(
 		private RTCPeerConnection $connection,
@@ -33,10 +40,12 @@ final class NetherNetSession implements TransportSession{
 		private string $address,
 		private int $port,
 		\Closure $packetHandler,
-		\Closure $closeHandler
+		\Closure $closeHandler,
+		\Closure $ackHandler
 	){
 		$this->packetHandler = $packetHandler;
 		$this->closeHandler = $closeHandler;
+		$this->ackHandler = $ackHandler;
 	}
 
 	public function getId() : int{
@@ -52,11 +61,23 @@ final class NetherNetSession implements TransportSession{
 	}
 
 	public function getPing() : int{
-		return -1;
+		$srtt = SctpStatsReader::smoothedRoundTripTime($this->reliableChannel);
+		if($srtt === null){
+			return -1;
+		}
+		//SRTT is a full round trip in seconds, ping is conventionally one-way in milliseconds. weird right?
+		return (int) round($srtt * 1000 / 2);
 	}
 
 	public function isConnected() : bool{
 		return $this->connected;
+	}
+
+	public function collectBandwidthDelta() : array{
+		$delta = [$this->bytesSent, $this->bytesReceived];
+		$this->bytesSent = 0;
+		$this->bytesReceived = 0;
+		return $delta;
 	}
 
 	public function bindChannel(RTCDataChannel $channel) : void{
@@ -77,6 +98,21 @@ final class NetherNetSession implements TransportSession{
 		return $this->reliableChannel !== null && $this->reliableChannel->getReadyState() === State::Open;
 	}
 
+	public function setAuthenticatedPublicKey(?string $publicKeyBase64) : void{
+		$this->authenticatedPublicKey = $publicKeyBase64;
+	}
+
+	public function getAuthenticatedPublicKey() : ?string{
+		return $this->authenticatedPublicKey;
+	}
+
+	public function markOpenNotified() : bool{
+		if($this->openNotified){
+			return false;
+		}
+		return $this->openNotified = true;
+	}
+
 	public function getReliableChannel() : ?RTCDataChannel{
 		return $this->reliableChannel;
 	}
@@ -85,6 +121,7 @@ final class NetherNetSession implements TransportSession{
 		if($data === "" || !$this->connected){
 			return;
 		}
+		$this->bytesReceived += strlen($data);
 		$remaining = ord($data[0]);
 		$this->receiveBuffer .= substr($data, 1);
 		if($remaining === 0){
@@ -94,7 +131,7 @@ final class NetherNetSession implements TransportSession{
 		}
 	}
 
-	public function sendPacket(string $payload, bool $immediate = false) : void{
+	public function sendPacket(string $payload, bool $immediate = false, ?int $receiptId = null) : void{
 		if(!$this->connected || $this->reliableChannel === null){
 			return;
 		}
@@ -105,8 +142,13 @@ final class NetherNetSession implements TransportSession{
 		}
 		$remaining = $segments - 1;
 		for($offset = 0; $offset === 0 || $offset < $length; $offset += self::MAX_MESSAGE_SIZE){
-			$this->reliableChannel->send(chr($remaining) . substr($payload, $offset, self::MAX_MESSAGE_SIZE));
+			$segment = chr($remaining) . substr($payload, $offset, self::MAX_MESSAGE_SIZE);
+			$this->reliableChannel->send($segment);
+			$this->bytesSent += strlen($segment);
 			$remaining--;
+		}
+		if($receiptId !== null){
+			($this->ackHandler)($receiptId);
 		}
 	}
 
