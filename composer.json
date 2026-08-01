@@ -1,0 +1,20 @@
+{
+  "name": "altayofficial/network",
+  "description": "Central network library for Altay written in PHP",
+  "type": "library",
+  "license": "GPL-3.0-or-later",
+  "require": {
+    "php": "^8.1",
+    "ext-sockets": "*",
+    "ext-openssl": "*",
+    "pocketmine/binaryutils": "^0.2.6",
+    "pocketmine/log": "^0.4.0",
+    "quasarstream/webrtc": "^1.0",
+    "react/event-loop": "^1.5"
+  },
+  "autoload": {
+    "psr-4": {
+      "altay\\network\\": "src/"
+    }
+  }
+}
