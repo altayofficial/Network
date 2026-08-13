@@ -15,8 +15,14 @@
   "require-dev": {
     "phpunit/phpunit": "^10.5",
     "phpstan/phpstan": "^2.0",
-    "quasarstream/webrtc": "^1.0"
+    "altayofficial/webrtc-php81": "^1.0"
   },
+  "repositories": [
+    {
+      "type": "vcs",
+      "url": "https://github.com/altayofficial/webrtc-php81"
+    }
+  ],
   "autoload": {
     "psr-4": {
       "altay\\network\\": "src/"
@@ -28,7 +34,7 @@
     }
   },
   "suggest": {
-    "quasarstream/webrtc": "Required for the NetherNet transport"
+    "altayofficial/webrtc-php81": "Required for the NetherNet transport"
   },
   "scripts": {
     "test": "phpunit",
