@@ -74,9 +74,20 @@ final class NetherNetTransport implements NameableTransport{
 		private ServerData $serverData,
 		private string $bindAddress = "0.0.0.0",
 		private int $port = self::DISCOVERY_PORT,
-		private bool $requireIdentity = false
+		private bool $requireIdentity = false,
+		private ?Credentials $credentials = null
 	){
 		$this->addressBook = new AddressBook();
+	}
+
+	/**
+	 * Replaces the STUN/TURN servers used by connections negotiated from now on.
+	 *
+	 * Credentials issued by a signalling service expire, so they have to be refreshed rather than
+	 * fixed at construction. Connections already established keep the servers they were built with.
+	 */
+	public function setCredentials(?Credentials $credentials) : void{
+		$this->credentials = $credentials;
 	}
 
 	public function getName() : string{
@@ -336,7 +347,7 @@ final class NetherNetTransport implements NameableTransport{
 		}
 
 		try{
-			$connection = new RTCPeerConnection();
+			$connection = $this->createPeerConnection();
 		}catch(\Throwable $e){
 			$this->logger->error("Failed to create peer connection: " . $e->getMessage());
 			$this->sendError($connectionId, $senderNetworkId, $address, $port, SignalErrorCode::FAILED_TO_CREATE_PEER_CONNECTION);
@@ -501,6 +512,21 @@ final class NetherNetTransport implements NameableTransport{
 		}catch(\InvalidArgumentException){
 
 		}
+	}
+
+	/**
+	 * Expired credentials are dropped rather than used - a TURN server rejects them anyway, and
+	 * gathering then stalls until it times out instead of failing outright.
+	 */
+	private function createPeerConnection() : RTCPeerConnection{
+		if($this->credentials === null || $this->credentials->isExpired()){
+			if($this->credentials !== null){
+				$this->logger->debug("Discarding expired NetherNet credentials");
+				$this->credentials = null;
+			}
+			return new RTCPeerConnection();
+		}
+		return new RTCPeerConnection($this->credentials->toPeerConnectionConfiguration());
 	}
 
 	/**
