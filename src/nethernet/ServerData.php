@@ -25,20 +25,17 @@ declare(strict_types=1);
 
 namespace altay\network\nethernet;
 
+use altay\network\nethernet\types\ConnectionType;
+use altay\network\nethernet\types\TransportLayer;
 use pocketmine\utils\BinaryStream;
 
 final class ServerData{
 
-	public const VERSION = 5;
+	public const VERSION = 7;
 
-	public const GAME_TYPE_SURVIVAL = 0;
+	public const GAME_TYPE_SURVIVAL = 0; // TODO: we have this, kinda duplicate code
 	public const GAME_TYPE_CREATIVE = 1;
 	public const GAME_TYPE_ADVENTURE = 2;
-
-	public const TRANSPORT_LAYER_RAKNET = 0;
-	public const TRANSPORT_LAYER_NETHERNET = 2;
-
-	public const CONNECTION_TYPE_LAN_SIGNALING = 4;
 
 	public function __construct(
 		public string $serverName = "Altay",
@@ -50,8 +47,9 @@ final class ServerData{
 		public bool $hardcore = false,
 		public bool $acceptsOnlineAuth = false,
 		public bool $acceptsSelfSignedAuth = true,
-		public int $transportLayer = self::TRANSPORT_LAYER_NETHERNET, // wtf? mojang
-		public int $connectionType = self::CONNECTION_TYPE_LAN_SIGNALING
+        public string $nonce = "",
+		public TransportLayer $transportLayer = TransportLayer::NETHERNET,
+		public ConnectionType $connectionType = ConnectionType::LAN_SIGNALING
 	){}
 
 	public function encode() : string{
@@ -66,8 +64,9 @@ final class ServerData{
 		$out->putBool($this->hardcore);
 		$out->putBool($this->acceptsOnlineAuth);
 		$out->putBool($this->acceptsSelfSignedAuth);
-		$out->putVarInt($this->transportLayer);
-		$out->putVarInt($this->connectionType);
+        self::putString($out, $this->nonce);
+		$out->putVarInt($this->transportLayer->value);
+		$out->putVarInt($this->connectionType->value);
 		return $out->getBuffer();
 	}
 
