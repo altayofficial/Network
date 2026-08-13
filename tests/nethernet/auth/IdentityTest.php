@@ -33,12 +33,27 @@ final class IdentityTest extends TestCase{
 	}
 
 	/**
+	 * Builds the JSON Web Key form of the client key, which is the other shape a cpk claim takes.
+	 *
+	 * @return array<string, string>
+	 */
+	private function clientJwk() : array{
+		$ec = openssl_pkey_get_details($this->clientKey)["ec"];
+		return [
+			"kty" => "EC",
+			"crv" => "P-384",
+			"x" => JwsEs384::base64UrlEncode(str_pad($ec["x"], 48, "\x00", STR_PAD_LEFT)),
+			"y" => JwsEs384::base64UrlEncode(str_pad($ec["y"], 48, "\x00", STR_PAD_LEFT))
+		];
+	}
+
+	/**
 	 * @param array<string, mixed>|null $idp
 	 */
-	private function buildClientOffer(string $fingerprint, ?int $exp = null, ?array $idp = ["domain" => "test", "protocol" => "default"]) : string{
+	private function buildClientOffer(string $fingerprint, ?int $exp = null, ?array $idp = ["domain" => "test", "protocol" => "default"], mixed $cpk = null) : string{
 		$b64u = fn(string $d) => JwsEs384::base64UrlEncode($d);
 		$header = $b64u(json_encode(["alg" => "ES384"]));
-		$claims = $b64u(json_encode(["cpk" => $this->clientPublicKey, "exp" => $exp ?? time() + 300]));
+		$claims = $b64u(json_encode(["cpk" => $cpk ?? $this->clientPublicKey, "exp" => $exp ?? time() + 300]));
 		$token = "$header.$claims." . $b64u(JwsEs384::sign("$header.$claims", $this->clientKey));
 
 		$sdp = $this->sdp($fingerprint);
@@ -77,6 +92,36 @@ final class IdentityTest extends TestCase{
 
 	public function testMissingIdentityReturnsNull() : void{
 		self::assertNull(ClientIdentityAssertion::fromSdp($this->sdp($this->fingerprint("cert"))));
+	}
+
+	/**
+	 * A JWK cpk has to end up as the same PKIX key the string form carries, otherwise the
+	 * fingerprint signature could not be verified against it.
+	 */
+	public function testJwkPublicKeyIsAcceptedAndMatchesTheStringForm() : void{
+		$fp = $this->fingerprint("cert");
+		$offer = $this->buildClientOffer($fp, null, ["domain" => "test", "protocol" => "default"], $this->clientJwk());
+
+		$assertion = ClientIdentityAssertion::fromSdp($offer);
+		self::assertNotNull($assertion);
+		self::assertSame($this->clientPublicKey, $assertion->getPublicKeyBase64());
+		$assertion->verify($offer);
+	}
+
+	public function testJwkWithUnsupportedCurveRejected() : void{
+		$jwk = $this->clientJwk();
+		$jwk["crv"] = "P-192";
+
+		$this->expectException(IdentityException::class);
+		ClientIdentityAssertion::fromSdp($this->buildClientOffer($this->fingerprint("cert"), null, ["domain" => "test", "protocol" => "default"], $jwk));
+	}
+
+	public function testJwkWithNonEcKeyTypeRejected() : void{
+		$jwk = $this->clientJwk();
+		$jwk["kty"] = "RSA";
+
+		$this->expectException(IdentityException::class);
+		ClientIdentityAssertion::fromSdp($this->buildClientOffer($this->fingerprint("cert"), null, ["domain" => "test", "protocol" => "default"], $jwk));
 	}
 
 	public function testMissingIdentityProviderRejected() : void{

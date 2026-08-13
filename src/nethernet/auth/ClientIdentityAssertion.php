@@ -113,7 +113,7 @@ final class ClientIdentityAssertion{
 			throw new IdentityException("Identity token payload is not valid base64");
 		}
 		$claims = json_decode($payload, true);
-		if(!is_array($claims) || !isset($claims["cpk"]) || !is_string($claims["cpk"])){
+		if(!is_array($claims) || !isset($claims["cpk"])){
 			throw new IdentityException("Identity token does not contain a cpk claim");
 		}
 		if(isset($claims["exp"]) && is_int($claims["exp"]) && $claims["exp"] < time()){
@@ -122,7 +122,9 @@ final class ClientIdentityAssertion{
 		if(isset($claims["nbf"]) && is_int($claims["nbf"]) && $claims["nbf"] > time() + 60){
 			throw new IdentityException("Identity token is not yet valid");
 		}
-		return [$claims, $claims["cpk"]];
+		//the claim is either a base64 encoded PKIX key or a JSON Web Key object
+		$publicKey = is_string($claims["cpk"]) ? $claims["cpk"] : JwkPublicKey::toBase64Der($claims["cpk"]);
+		return [$claims, $publicKey];
 	}
 
 	/**
