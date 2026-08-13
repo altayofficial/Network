@@ -32,6 +32,8 @@ use altay\network\nethernet\discovery\DiscoveryResponsePacket;
 use altay\network\nethernet\auth\ClientIdentityAssertion;
 use altay\network\nethernet\auth\IdentityException;
 use altay\network\nethernet\auth\ServerIdentity;
+use altay\network\nethernet\sdp\IceCandidate;
+use altay\network\nethernet\sdp\SessionDescription;
 use altay\network\nethernet\types\SignalErrorCode;
 use altay\network\transport\NameableTransport;
 use altay\network\transport\TransportException;
@@ -336,11 +338,10 @@ final class NetherNetTransport implements NameableTransport{
 					$this->dropConnection($connectionId, "no local description", SignalErrorCode::FAILED_TO_SET_LOCAL_DESCRIPTION);
 					return;
 				}
+				$sdp = $local->getSdp();
 				$this->logger->debug("Sending answer for connection $connectionId");
-				$this->sendSignal(new Signal(Signal::TYPE_ANSWER, $connectionId, $this->withIdentityAttribute($local->getSdp())), $senderNetworkId, $address, $port);
-				foreach($this->extractCandidates($local->getSdp()) as $candidate){
-					$this->sendSignal(new Signal(Signal::TYPE_CANDIDATE, $connectionId, $candidate), $senderNetworkId, $address, $port);
-				}
+				$this->sendSignal(new Signal(Signal::TYPE_ANSWER, $connectionId, $this->withIdentityAttribute($sdp)), $senderNetworkId, $address, $port);
+				$this->trickleCandidates($sdp, $connectionId, $senderNetworkId, $address, $port);
 			})
 			->catch(function(\Throwable $e) use ($connectionId) : void{
 				$this->logger->error("NetherNet negotiation failed for connection $connectionId: " . $e->getMessage());
@@ -468,16 +469,20 @@ final class NetherNetTransport implements NameableTransport{
 	}
 
 	/**
-	 * @return string[]
+	 * Signals each locally gathered candidate separately.
+	 *
+	 * The candidates cannot be copied straight out of the local description - vanilla only accepts
+	 * the form the C++ WebRTC implementation produces, which carries a 'ufrag' and a per-candidate
+	 * 'network-id' that an SDP attribute does not have.
 	 */
-	private function extractCandidates(string $sdp) : array{
-		$candidates = [];
-		foreach(explode("\n", $sdp) as $line){
-			$line = trim($line);
-			if(str_starts_with($line, "a=candidate:")){
-				$candidates[] = substr($line, 2);
-			}
+	private function trickleCandidates(string $sdp, string $connectionId, int $recipientNetworkId, string $address, int $port) : void{
+		$ufrag = SessionDescription::attribute($sdp, "ice-ufrag");
+		if($ufrag === null){
+			$this->logger->debug("Local description for connection $connectionId has no ice-ufrag, not signalling candidates");
+			return;
 		}
-		return $candidates;
+		foreach(IceCandidate::parseAll($sdp) as $networkId => $candidate){
+			$this->sendSignal(new Signal(Signal::TYPE_CANDIDATE, $connectionId, $candidate->format($networkId, $ufrag)), $recipientNetworkId, $address, $port);
+		}
 	}
 }
