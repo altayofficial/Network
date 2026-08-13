@@ -44,6 +44,7 @@ use altay\network\utils\Uint64;
 use React\EventLoop\Loop;
 use function React\Promise\set_rejection_handler;
 use Webrtc\DataChannel\RTCDataChannel;
+use Webrtc\DataChannel\RTCDataChannelParameters;
 use Webrtc\ICE\RTCIceCandidate;
 use Webrtc\SDP\RTCSessionDescription;
 use Webrtc\Webrtc\Enum\ConnectionState;
@@ -60,7 +61,7 @@ final class NetherNetTransport implements NameableTransport{
 	private ?TransportListener $listener = null;
 	private ?ServerIdentity $identity = null;
 
-	/** @var array<string, array{connection: RTCPeerConnection, networkId: int, address: string, port: int, publicKey: ?string, createdAt: int}> */
+	/** @var array<string, array{connection: RTCPeerConnection, networkId: int, address: string, port: int, publicKey: ?string, createdAt: int, outgoing: bool}> */
 	private array $pending = [];
 	/** @var NetherNetSession[] */
 	private array $sessions = [];
@@ -311,6 +312,9 @@ final class NetherNetTransport implements NameableTransport{
 			case Signal::TYPE_OFFER:
 				$this->handleOffer($signal, $senderNetworkId, $address, $port);
 				break;
+			case Signal::TYPE_ANSWER:
+				$this->handleAnswer($signal);
+				break;
 			case Signal::TYPE_CANDIDATE:
 				$this->handleCandidate($signal);
 				break;
@@ -360,7 +364,8 @@ final class NetherNetTransport implements NameableTransport{
 			"address" => $address,
 			"port" => $port,
 			"publicKey" => $assertion?->getPublicKeyBase64(),
-			"createdAt" => time()
+			"createdAt" => time(),
+			"outgoing" => false
 		];
 
 		$connection->on("datachannel", function(RTCDataChannel $channel) use ($connectionId, $sessionId, $address, $port, $connection) : void{
@@ -414,9 +419,28 @@ final class NetherNetTransport implements NameableTransport{
 		}
 	}
 
+	/**
+	 * Finds the peer connection a signal belongs to.
+	 *
+	 * A connection stops being pending once its session exists, but ICE keeps trickling candidates
+	 * well past that point - looking only at the pending list would silently discard them.
+	 */
+	private function connectionFor(string $connectionId) : ?RTCPeerConnection{
+		$entry = $this->pending[$connectionId] ?? null;
+		if($entry !== null){
+			return $entry["connection"];
+		}
+		try{
+			$sessionId = Uint64::toSignedInt($connectionId);
+		}catch(\InvalidArgumentException){
+			return null;
+		}
+		return ($this->sessions[$sessionId] ?? null)?->getConnection();
+	}
+
 	private function handleCandidate(Signal $signal) : void{
-		$entry = $this->pending[$signal->connectionId] ?? null;
-		if($entry === null){
+		$connection = $this->connectionFor($signal->connectionId);
+		if($connection === null){
 			return;
 		}
 		$candidate = IceCandidate::parse($signal->data);
@@ -424,45 +448,67 @@ final class NetherNetTransport implements NameableTransport{
 			$this->logger->debug("Ignoring malformed ICE candidate for connection $signal->connectionId");
 			return;
 		}
-		$this->addCandidate($entry["connection"], $candidate, $signal->connectionId);
+		$this->addCandidate($connection, $candidate, $signal->connectionId);
 	}
 
 	private function addCandidate(RTCPeerConnection $connection, IceCandidate $candidate, string $connectionId) : void{
 		try{
-			$connection->addIceCandidate(RTCIceCandidate::parseSDP($candidate->toSdpValue()));
+			$parsed = RTCIceCandidate::parseSDP($candidate->toSdpValue());
+			//a candidate signalled on its own carries no media section, but the library insists on
+			//knowing which one it belongs to. NetherNet only ever negotiates the one, mid 0
+			$parsed->setSdpMid(0);
+			$parsed->setSdpMLineIndex(0);
+			$connection->addIceCandidate($parsed);
 		}catch(\Throwable $e){
 			$this->logger->debug("Ignoring invalid ICE candidate for connection $connectionId: " . $e->getMessage());
 		}
 	}
 
-	private function handleDataChannel(RTCPeerConnection $connection, RTCDataChannel $channel, string $connectionId, int $sessionId, string $address, int $port) : void{
+	/**
+	 * Creates the session for a connection, or returns the one already registered for it.
+	 *
+	 * The peer that dials creates its own data channels rather than waiting for them to arrive, so
+	 * both directions need this without going through the datachannel event.
+	 */
+	private function openSession(RTCPeerConnection $connection, string $connectionId, int $sessionId, string $address, int $port) : NetherNetSession{
 		$session = $this->sessions[$sessionId] ?? null;
-		if($session === null){
-			$session = new NetherNetSession(
-				$connection,
-				$sessionId,
-				$address,
-				$port,
-				function(string $payload) use ($sessionId) : void{
-					$session = $this->sessions[$sessionId] ?? null;
-					if($session !== null){
-						$this->listener?->onPacketReceive($this, $session, $payload);
-					}
-				},
-				function(string $reason) use ($sessionId) : void{
-					$this->closeSession($sessionId, $reason);
-				},
-				function(int $receiptId) use ($sessionId) : void{
-					$session = $this->sessions[$sessionId] ?? null;
-					if($session !== null){
-						$this->listener?->onPacketAck($this, $session, $receiptId);
-					}
+		if($session !== null){
+			return $session;
+		}
+
+		$session = new NetherNetSession(
+			$connection,
+			$sessionId,
+			$address,
+			$port,
+			function(string $payload) use ($sessionId) : void{
+				$session = $this->sessions[$sessionId] ?? null;
+				if($session !== null){
+					$this->listener?->onPacketReceive($this, $session, $payload);
 				}
-			);
-			$session->setAuthenticatedPublicKey($this->pending[$connectionId]["publicKey"] ?? null);
-			$this->sessions[$sessionId] = $session;
+			},
+			function(string $reason) use ($sessionId) : void{
+				$this->closeSession($sessionId, $reason);
+			},
+			function(int $receiptId) use ($sessionId) : void{
+				$session = $this->sessions[$sessionId] ?? null;
+				if($session !== null){
+					$this->listener?->onPacketAck($this, $session, $receiptId);
+				}
+			}
+		);
+		$session->setAuthenticatedPublicKey($this->pending[$connectionId]["publicKey"] ?? null);
+		$this->sessions[$sessionId] = $session;
+		//an outgoing connection has its session before it has an answer, and the pending entry is
+		//what routes that answer back to the right peer connection - it is dropped in handleAnswer()
+		if(($this->pending[$connectionId]["outgoing"] ?? false) === false){
 			unset($this->pending[$connectionId]);
 		}
+		return $session;
+	}
+
+	private function handleDataChannel(RTCPeerConnection $connection, RTCDataChannel $channel, string $connectionId, int $sessionId, string $address, int $port) : void{
+		$session = $this->openSession($connection, $connectionId, $sessionId, $address, $port);
 		$this->logger->debug("Data channel \"" . $channel->getLabel() . "\" received for connection $connectionId");
 		if(!$session->bindChannel($channel)){
 			$this->logger->debug("Rejecting unexpected data channel \"" . $channel->getLabel() . "\" for connection $connectionId");
@@ -512,6 +558,129 @@ final class NetherNetTransport implements NameableTransport{
 		}catch(\InvalidArgumentException){
 
 		}
+	}
+
+	/**
+	 * Opens a connection to a remote network, which must already be in the address book - it lands
+	 * there as soon as the network broadcasts a discovery packet.
+	 *
+	 * Negotiation is inverted relative to an inbound connection: this side picks the connection ID,
+	 * creates both data channels itself, and sends the offer. The returned session is not usable
+	 * until the listener reports it open.
+	 *
+	 * @throws TransportException
+	 */
+	public function dial(int $networkId) : NetherNetSession{
+		if($this->socket === null){
+			throw new TransportException("NetherNet transport is not running");
+		}
+		$target = $this->addressBook->lookup($networkId);
+		if($target === null){
+			throw new TransportException("Network $networkId has not been discovered");
+		}
+		[$address, $port] = $target;
+
+		//the dialling side owns the connection ID, and the session ID is derived from it exactly as
+		//it is for an inbound connection so both directions agree on how sessions are keyed
+		$connectionId = (string) random_int(0, PHP_INT_MAX);
+		$sessionId = Uint64::toSignedInt($connectionId);
+
+		try{
+			$connection = $this->createPeerConnection();
+		}catch(\Throwable $e){
+			throw new TransportException("Failed to create peer connection: " . $e->getMessage(), 0, $e);
+		}
+
+		$this->pending[$connectionId] = [
+			"connection" => $connection,
+			"networkId" => $networkId,
+			"address" => $address,
+			"port" => $port,
+			"publicKey" => null,
+			"createdAt" => time(),
+			"outgoing" => true
+		];
+		$connection->on("connectionstatechange", function() use ($connection, $connectionId) : void{
+			$state = $connection->getConnectionState();
+			if($state === ConnectionState::failed || $state === ConnectionState::closed){
+				$this->dropConnection($connectionId, "peer connection " . $state->name);
+			}
+		});
+
+		$session = $this->openSession($connection, $connectionId, $sessionId, $address, $port);
+		//the remote peer never opens channels on a connection it did not dial, so both are created here
+		foreach([
+			new RTCDataChannelParameters(label: NetherNetSession::RELIABLE_CHANNEL, ordered: true),
+			new RTCDataChannelParameters(label: NetherNetSession::UNRELIABLE_CHANNEL, maxRetransmits: 0)
+		] as $parameters){
+			$channel = $connection->createDataChannel($parameters);
+			$session->bindChannel($channel);
+			$channel->on("open", function() use ($sessionId) : void{
+				$session = $this->sessions[$sessionId] ?? null;
+				if($session !== null && $session->isReady() && $session->markOpenNotified()){
+					$this->listener?->onSessionOpen($this, $session);
+				}
+			});
+		}
+
+		$connection->createOffer()
+			->then(fn(RTCSessionDescription $offer) => $connection->setLocalDescription($offer))
+			->then(function() use ($connection, $connectionId, $networkId, $address, $port) : void{
+				$local = $connection->getLocalDescription();
+				if($local === null){
+					$this->dropConnection($connectionId, "no local description", SignalErrorCode::FAILED_TO_SET_LOCAL_DESCRIPTION);
+					return;
+				}
+				$sdp = AnswerRewriter::conform($local->getSdp());
+				$this->logger->debug("Sending offer for connection $connectionId to network $networkId");
+				$this->sendSignal(new Signal(Signal::TYPE_OFFER, $connectionId, $this->withIdentityAttribute($sdp)), $networkId, $address, $port);
+				$this->trickleCandidates($sdp, $connectionId, $networkId, $address, $port);
+			})
+			->catch(function(\Throwable $e) use ($connectionId) : void{
+				$this->logger->error("NetherNet dial failed for connection $connectionId: " . $e->getMessage());
+				$this->dropConnection($connectionId, "dial failed", SignalErrorCode::FAILED_TO_CREATE_OFFER);
+			});
+
+		return $session;
+	}
+
+	/**
+	 * Handles the answer to an offer this side sent.
+	 */
+	private function handleAnswer(Signal $signal) : void{
+		$entry = $this->pending[$signal->connectionId] ?? null;
+		if($entry === null || !$entry["outgoing"]){
+			$this->logger->debug("Ignoring unsolicited answer for connection $signal->connectionId");
+			return;
+		}
+
+		try{
+			$assertion = ClientIdentityAssertion::fromSdp($signal->data);
+			$assertion?->verify($signal->data);
+		}catch(IdentityException $e){
+			$this->logger->info("Rejecting answer for connection $signal->connectionId: invalid identity assertion: " . $e->getMessage());
+			$this->dropConnection($signal->connectionId, "invalid server identity", SignalErrorCode::IDENTITY_VERIFICATION_FAILED);
+			return;
+		}
+		if($assertion === null && $this->requireIdentity){
+			$this->logger->info("Rejecting answer for connection $signal->connectionId: identity assertion required but not provided");
+			$this->dropConnection($signal->connectionId, "missing server identity", SignalErrorCode::IDENTITY_VERIFICATION_FAILED);
+			return;
+		}
+		($this->sessions[Uint64::toSignedInt($signal->connectionId)] ?? null)?->setAuthenticatedPublicKey($assertion?->getPublicKeyBase64());
+
+		$connection = $entry["connection"];
+		$answer = $signal->data;
+		//the negotiation is over; from here the session's own readiness deadline applies
+		unset($this->pending[$signal->connectionId]);
+		$connection->setRemoteDescription(new RTCSessionDescription($answer, "answer"))
+			->then(function() use ($connection, $answer, $signal) : void{
+				$this->addSessionLevelCandidates($connection, $answer, $signal->connectionId);
+			})
+			->catch(function(\Throwable $e) use ($signal) : void{
+				$this->logger->error("Failed to apply answer for connection $signal->connectionId: " . $e->getMessage());
+				$this->dropConnection($signal->connectionId, "invalid answer", SignalErrorCode::FAILED_TO_SET_REMOTE_DESCRIPTION);
+			});
 	}
 
 	/**

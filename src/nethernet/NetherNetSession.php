@@ -177,6 +177,10 @@ final class NetherNetSession implements TransportSession{
 		return $this->openNotified = true;
 	}
 
+	public function getConnection() : RTCPeerConnection{
+		return $this->connection;
+	}
+
 	public function getReliableChannel() : ?RTCDataChannel{
 		return $this->reliableChannel;
 	}
@@ -248,8 +252,9 @@ final class NetherNetSession implements TransportSession{
 		if($this->connected){
 			$this->connected = false;
 			try{
-				$this->reliableChannel?->close();
-				$this->unreliableChannel?->close();
+				//closing the peer connection tears the data channels down with it. Closing them
+				//first queues an SCTP stream reset, which then fails to send once DTLS is gone and
+				//surfaces as an unhandled rejection during teardown
 				$this->connection->close();
 			}catch(\Throwable){
 
