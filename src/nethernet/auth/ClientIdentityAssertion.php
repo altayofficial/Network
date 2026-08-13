@@ -74,10 +74,32 @@ final class ClientIdentityAssertion{
 		){
 			throw new IdentityException("Identity assertion has an invalid structure");
 		}
+		self::checkIdentityProvider($data["idp"] ?? null);
 
 		[$claims, $publicKeyBase64] = self::extractTokenClaims($assertion["token"]);
 
 		return new self($assertion["fingerprints"], $assertion["token"], $publicKeyBase64, $claims);
+	}
+
+	/**
+	 * Checks the identity provider block that accompanies the assertion.
+	 *
+	 * The protocol is always 'default' for NetherNet, and the domain names the issuer of the token -
+	 * Minecraft's authorization service for clients, 'self' for a self-signed server identity. An
+	 * assertion missing either is not one a vanilla peer would have produced.
+	 *
+	 * @throws IdentityException
+	 */
+	private static function checkIdentityProvider(mixed $idp) : void{
+		if(!is_array($idp)){
+			throw new IdentityException("Identity assertion has no identity provider");
+		}
+		if(($idp["protocol"] ?? null) !== "default"){
+			throw new IdentityException("Identity provider uses an unsupported protocol");
+		}
+		if(!isset($idp["domain"]) || !is_string($idp["domain"]) || $idp["domain"] === ""){
+			throw new IdentityException("Identity provider has no domain");
+		}
 	}
 
 	/**

@@ -32,7 +32,10 @@ final class IdentityTest extends TestCase{
 		return strtoupper(implode(":", str_split(hash("sha256", $seed), 2)));
 	}
 
-	private function buildClientOffer(string $fingerprint, ?int $exp = null) : string{
+	/**
+	 * @param array<string, mixed>|null $idp
+	 */
+	private function buildClientOffer(string $fingerprint, ?int $exp = null, ?array $idp = ["domain" => "test", "protocol" => "default"]) : string{
 		$b64u = fn(string $d) => JwsEs384::base64UrlEncode($d);
 		$header = $b64u(json_encode(["alg" => "ES384"]));
 		$claims = $b64u(json_encode(["cpk" => $this->clientPublicKey, "exp" => $exp ?? time() + 300]));
@@ -42,11 +45,11 @@ final class IdentityTest extends TestCase{
 		$payload = SdpFingerprints::canonicalPayload($sdp);
 		$fpJws = "$header.." . $b64u(JwsEs384::sign("$header." . $b64u($payload), $this->clientKey));
 
-		$identity = base64_encode(json_encode([
-			"assertion" => json_encode(["fingerprints" => $fpJws, "token" => $token]),
-			"idp" => ["domain" => "test", "protocol" => "default"]
-		]));
-		return $sdp . "a=identity:$identity\r\n";
+		$data = ["assertion" => json_encode(["fingerprints" => $fpJws, "token" => $token])];
+		if($idp !== null){
+			$data["idp"] = $idp;
+		}
+		return $sdp . "a=identity:" . base64_encode(json_encode($data)) . "\r\n";
 	}
 
 	public function testValidAssertionVerifies() : void{
@@ -74,6 +77,21 @@ final class IdentityTest extends TestCase{
 
 	public function testMissingIdentityReturnsNull() : void{
 		self::assertNull(ClientIdentityAssertion::fromSdp($this->sdp($this->fingerprint("cert"))));
+	}
+
+	public function testMissingIdentityProviderRejected() : void{
+		$this->expectException(IdentityException::class);
+		ClientIdentityAssertion::fromSdp($this->buildClientOffer($this->fingerprint("cert"), null, null));
+	}
+
+	public function testUnsupportedIdentityProviderProtocolRejected() : void{
+		$this->expectException(IdentityException::class);
+		ClientIdentityAssertion::fromSdp($this->buildClientOffer($this->fingerprint("cert"), null, ["domain" => "test", "protocol" => "custom"]));
+	}
+
+	public function testEmptyIdentityProviderDomainRejected() : void{
+		$this->expectException(IdentityException::class);
+		ClientIdentityAssertion::fromSdp($this->buildClientOffer($this->fingerprint("cert"), null, ["domain" => "", "protocol" => "default"]));
 	}
 
 	public function testServerIdentityRoundTrip() : void{
