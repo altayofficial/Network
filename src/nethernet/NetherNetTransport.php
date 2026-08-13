@@ -25,6 +25,7 @@ declare(strict_types=1);
 
 namespace altay\network\nethernet;
 
+use altay\network\nethernet\discovery\AddressBook;
 use altay\network\nethernet\discovery\DiscoveryCodec;
 use altay\network\nethernet\discovery\DiscoveryMessagePacket;
 use altay\network\nethernet\discovery\DiscoveryRequestPacket;
@@ -64,6 +65,7 @@ final class NetherNetTransport implements NameableTransport{
 	/** @var NetherNetSession[] */
 	private array $sessions = [];
 
+	private AddressBook $addressBook;
 	private int $lastMaintenance = 0;
 
 	public function __construct(
@@ -73,10 +75,16 @@ final class NetherNetTransport implements NameableTransport{
 		private string $bindAddress = "0.0.0.0",
 		private int $port = self::DISCOVERY_PORT,
 		private bool $requireIdentity = false
-	){}
+	){
+		$this->addressBook = new AddressBook();
+	}
 
 	public function getName() : string{
 		return "nethernet";
+	}
+
+	public function getAddressBook() : AddressBook{
+		return $this->addressBook;
 	}
 
 	public function getNetworkId() : int{
@@ -166,6 +174,7 @@ final class NetherNetTransport implements NameableTransport{
 			$this->lastMaintenance = $now;
 			$this->expireStalePending($now);
 			$this->expireUnreadySessions($now);
+			$this->addressBook->expire($now);
 			$this->reportBandwidth();
 		}
 	}
@@ -262,6 +271,7 @@ final class NetherNetTransport implements NameableTransport{
 		if($senderId === $this->networkId){
 			return;
 		}
+		$this->addressBook->remember($senderId, $address, $port, time());
 
 		if($packet instanceof DiscoveryRequestPacket){
 			$response = DiscoveryCodec::marshal(new DiscoveryResponsePacket($this->serverData->encode()), $this->networkId);
@@ -491,6 +501,20 @@ final class NetherNetTransport implements NameableTransport{
 		}catch(\InvalidArgumentException){
 
 		}
+	}
+
+	/**
+	 * Signals a network the transport has heard from, looking its address up rather than replying
+	 * to a datagram. Returns false when the network has not been seen, or has since expired.
+	 */
+	public function signalNetwork(Signal $signal, int $recipientNetworkId) : bool{
+		$target = $this->addressBook->lookup($recipientNetworkId);
+		if($target === null){
+			return false;
+		}
+		[$address, $port] = $target;
+		$this->sendSignal($signal, $recipientNetworkId, $address, $port);
+		return true;
 	}
 
 	private function sendError(string $connectionId, int $recipientNetworkId, string $address, int $port, SignalErrorCode $code) : void{
