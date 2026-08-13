@@ -41,6 +41,7 @@ final class NetherNetSession implements TransportSession{
 	private bool $connected = true;
 	private bool $openNotified = false;
 	private string $receiveBuffer = "";
+	private int $pendingSegments = 0;
 	private ?string $authenticatedPublicKey = null;
 	private ?RTCDataChannel $reliableChannel = null;
 	private ?RTCDataChannel $unreliableChannel = null;
@@ -50,7 +51,7 @@ final class NetherNetSession implements TransportSession{
 
 	/** @var \Closure(string) : void */
 	private \Closure $packetHandler;
-	/** @var \Closure() : void */
+	/** @var \Closure(string) : void */
 	private \Closure $closeHandler;
 	/** @var \Closure(int) : void */
 	private \Closure $ackHandler;
@@ -101,8 +102,15 @@ final class NetherNetSession implements TransportSession{
 		return $delta;
 	}
 
-	public function bindChannel(RTCDataChannel $channel) : void{
+	/**
+	 * Binds an inbound data channel to the session. Returns false when the peer opened a channel
+	 * the protocol does not define, or one it has already opened.
+	 */
+	public function bindChannel(RTCDataChannel $channel) : bool{
 		if($channel->getLabel() === self::RELIABLE_CHANNEL){
+			if($this->reliableChannel !== null){
+				return false;
+			}
 			$this->reliableChannel = $channel;
 			$channel->on("message", function(string $data) : void{
 				$this->handleMessage($data);
@@ -110,9 +118,16 @@ final class NetherNetSession implements TransportSession{
 			$channel->on("close", function() : void{
 				$this->onClosed();
 			});
-		}elseif($channel->getLabel() === self::UNRELIABLE_CHANNEL){
-			$this->unreliableChannel = $channel;
+			return true;
 		}
+		if($channel->getLabel() === self::UNRELIABLE_CHANNEL){
+			if($this->unreliableChannel !== null){
+				return false;
+			}
+			$this->unreliableChannel = $channel;
+			return true;
+		}
+		return false;
 	}
 
 	public function isReady() : bool{
@@ -139,17 +154,38 @@ final class NetherNetSession implements TransportSession{
 	}
 
 	private function handleMessage(string $data) : void{
-		if($data === "" || !$this->connected){
+		if(!$this->connected){
 			return;
 		}
 		$this->bytesReceived += strlen($data);
-		$remaining = ord($data[0]);
-		$this->receiveBuffer .= substr($data, 1);
-		if($remaining === 0){
-			$packet = $this->receiveBuffer;
-			$this->receiveBuffer = "";
-			($this->packetHandler)($packet);
+		if(strlen($data) < 2){
+			//a segment always carries the counter byte plus at least one payload byte
+			$this->closeWithError("received a message without a payload");
+			return;
 		}
+
+		//each segment is prefixed with the number of segments still to come, counting down to zero.
+		//an unexpected counter means the message can never be completed, so the peer is dropped instead
+		//of buffering data indefinitely
+		$remaining = ord($data[0]);
+		if($this->pendingSegments > 0 && $this->pendingSegments - 1 !== $remaining){
+			$this->closeWithError("expected segment counter " . ($this->pendingSegments - 1) . ", got $remaining");
+			return;
+		}
+		$this->pendingSegments = $remaining;
+		$this->receiveBuffer .= substr($data, 1);
+		if($remaining > 0){
+			return;
+		}
+
+		$packet = $this->receiveBuffer;
+		$this->receiveBuffer = "";
+		($this->packetHandler)($packet);
+	}
+
+	private function closeWithError(string $reason) : void{
+		$this->disconnect();
+		($this->closeHandler)($reason);
 	}
 
 	public function sendPacket(string $payload, bool $immediate = false, ?int $receiptId = null) : void{
@@ -188,8 +224,7 @@ final class NetherNetSession implements TransportSession{
 
 	private function onClosed() : void{
 		if($this->connected){
-			$this->disconnect();
-			($this->closeHandler)();
+			$this->closeWithError("data channel closed by the remote peer");
 		}
 	}
 }

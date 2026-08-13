@@ -38,12 +38,23 @@ final class Signal{
 		public string $data
 	){}
 
+	private const MAX_CONNECTION_ID = "18446744073709551615";
+
 	public static function fromString(string $str) : ?self{
 		$parts = explode(" ", $str, 3);
-		if(count($parts) !== 3 || !ctype_digit($parts[1]) || strlen($parts[1]) > 20){
+		if(count($parts) !== 3 || !ctype_digit($parts[1])){
 			return null;
 		}
-		return new self($parts[0], $parts[1], $parts[2]);
+		//the connection ID is an uint64 on the wire, compare as a string to keep it out of PHP's signed int range
+		$connectionId = ltrim($parts[1], "0");
+		if($connectionId === ""){
+			$connectionId = "0";
+		}
+		$length = strlen($connectionId);
+		if($length > strlen(self::MAX_CONNECTION_ID) || ($length === strlen(self::MAX_CONNECTION_ID) && strcmp($connectionId, self::MAX_CONNECTION_ID) > 0)){
+			return null;
+		}
+		return new self($parts[0], $connectionId, $parts[2]);
 	}
 
 	public function __toString() : string{

@@ -31,4 +31,15 @@ final class SignalTest extends TestCase{
 	public function testRejectsNonNumericConnectionId() : void{
 		self::assertNull(Signal::fromString("CONNECTREQUEST notanumber data"));
 	}
+
+	public function testRejectsConnectionIdAboveUint64() : void{
+		self::assertNull(Signal::fromString("CONNECTREQUEST 18446744073709551616 data"));
+		self::assertNull(Signal::fromString("CONNECTREQUEST 99999999999999999999999 data"));
+	}
+
+	public function testNormalisesLeadingZeroesInConnectionId() : void{
+		$parsed = Signal::fromString("CONNECTREQUEST 0000000005 data");
+		self::assertNotNull($parsed);
+		self::assertSame("5", $parsed->connectionId);
+	}
 }

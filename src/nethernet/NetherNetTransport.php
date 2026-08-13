@@ -32,6 +32,7 @@ use altay\network\nethernet\discovery\DiscoveryResponsePacket;
 use altay\network\nethernet\auth\ClientIdentityAssertion;
 use altay\network\nethernet\auth\IdentityException;
 use altay\network\nethernet\auth\ServerIdentity;
+use altay\network\nethernet\types\SignalErrorCode;
 use altay\network\transport\NameableTransport;
 use altay\network\transport\TransportException;
 use altay\network\transport\TransportListener;
@@ -168,7 +169,7 @@ final class NetherNetTransport implements NameableTransport{
 		foreach($this->pending as $connectionId => $entry){
 			if($now - $entry["createdAt"] >= self::PENDING_NEGOTIATION_TIMEOUT){
 				$this->logger->debug("Dropping stale pending negotiation $connectionId from " . $entry["address"] . ":" . $entry["port"]);
-				$this->dropConnection($connectionId, "negotiation timed out");
+				$this->dropConnection($connectionId, "negotiation timed out", SignalErrorCode::NEGOTIATION_TIMEOUT_WAITING_FOR_ACCEPT);
 			}
 		}
 	}
@@ -251,6 +252,10 @@ final class NetherNetTransport implements NameableTransport{
 				$this->logger->debug("Ignoring discovery message from $address:$port intended for network " . $packet->recipientId);
 				return;
 			}
+			if($packet->data === "" || $packet->data === "Ping"){
+				//keep-alive sent by clients scanning the network, it carries no signal
+				return;
+			}
 			$signal = Signal::fromString($packet->data);
 			if($signal === null){
 				$this->logger->debug("Invalid signal from $address:$port: " . substr($packet->data, 0, 64));
@@ -270,7 +275,8 @@ final class NetherNetTransport implements NameableTransport{
 				$this->handleCandidate($signal);
 				break;
 			case Signal::TYPE_ERROR:
-				$this->dropConnection($signal->connectionId, "remote error: " . $signal->data);
+				$code = ctype_digit($signal->data) ? SignalErrorCode::tryFrom((int) $signal->data) : null;
+				$this->dropConnection($signal->connectionId, "remote error: " . ($code !== null ? $code->name : $signal->data));
 				break;
 		}
 	}
@@ -291,10 +297,12 @@ final class NetherNetTransport implements NameableTransport{
 			$assertion?->verify($signal->data);
 		}catch(IdentityException $e){
 			$this->logger->info("Rejecting connection $connectionId from $address:$port: invalid identity assertion: " . $e->getMessage());
+			$this->sendError($connectionId, $senderNetworkId, $address, $port, SignalErrorCode::IDENTITY_VERIFICATION_FAILED);
 			return;
 		}
 		if($assertion === null && $this->requireIdentity){
 			$this->logger->info("Rejecting connection $connectionId from $address:$port: identity assertion required but not provided");
+			$this->sendError($connectionId, $senderNetworkId, $address, $port, SignalErrorCode::IDENTITY_VERIFICATION_FAILED);
 			return;
 		}
 
@@ -302,6 +310,7 @@ final class NetherNetTransport implements NameableTransport{
 			$connection = new RTCPeerConnection();
 		}catch(\Throwable $e){
 			$this->logger->error("Failed to create peer connection: " . $e->getMessage());
+			$this->sendError($connectionId, $senderNetworkId, $address, $port, SignalErrorCode::FAILED_TO_CREATE_PEER_CONNECTION);
 			return;
 		}
 		$this->logger->debug("Incoming NetherNet connection $connectionId from $address:$port (network ID $senderNetworkId)");
@@ -324,7 +333,7 @@ final class NetherNetTransport implements NameableTransport{
 			->then(function() use ($connection, $connectionId, $senderNetworkId, $address, $port) : void{
 				$local = $connection->getLocalDescription();
 				if($local === null){
-					$this->dropConnection($connectionId, "no local description");
+					$this->dropConnection($connectionId, "no local description", SignalErrorCode::FAILED_TO_SET_LOCAL_DESCRIPTION);
 					return;
 				}
 				$this->logger->debug("Sending answer for connection $connectionId");
@@ -335,7 +344,7 @@ final class NetherNetTransport implements NameableTransport{
 			})
 			->catch(function(\Throwable $e) use ($connectionId) : void{
 				$this->logger->error("NetherNet negotiation failed for connection $connectionId: " . $e->getMessage());
-				$this->dropConnection($connectionId, "negotiation failed");
+				$this->dropConnection($connectionId, "negotiation failed", SignalErrorCode::FAILED_TO_CREATE_ANSWER);
 			});
 	}
 
@@ -365,8 +374,8 @@ final class NetherNetTransport implements NameableTransport{
 						$this->listener?->onPacketReceive($this, $session, $payload);
 					}
 				},
-				function() use ($sessionId) : void{
-					$this->closeSession($sessionId, "channel closed");
+				function(string $reason) use ($sessionId) : void{
+					$this->closeSession($sessionId, $reason);
 				},
 				function(int $receiptId) use ($sessionId) : void{
 					$session = $this->sessions[$sessionId] ?? null;
@@ -380,7 +389,11 @@ final class NetherNetTransport implements NameableTransport{
 			unset($this->pending[$connectionId]);
 		}
 		$this->logger->debug("Data channel \"" . $channel->getLabel() . "\" received for connection $connectionId");
-		$session->bindChannel($channel);
+		if(!$session->bindChannel($channel)){
+			$this->logger->debug("Rejecting unexpected data channel \"" . $channel->getLabel() . "\" for connection $connectionId");
+			$this->dropConnection($connectionId, "unexpected data channel", SignalErrorCode::DATA_CHANNEL_CLOSED);
+			return;
+		}
 
 		if($channel->getLabel() === NetherNetSession::RELIABLE_CHANNEL){
 			$notifyOpen = function() use ($sessionId) : void{
@@ -407,10 +420,13 @@ final class NetherNetTransport implements NameableTransport{
 		}
 	}
 
-	private function dropConnection(string $connectionId, string $reason) : void{
+	private function dropConnection(string $connectionId, string $reason, ?SignalErrorCode $code = null) : void{
 		$entry = $this->pending[$connectionId] ?? null;
 		if($entry !== null){
 			unset($this->pending[$connectionId]);
+			if($code !== null){
+				$this->sendError($connectionId, $entry["networkId"], $entry["address"], $entry["port"], $code);
+			}
 			try{
 				$entry["connection"]->close();
 			}catch(\Throwable){
@@ -422,6 +438,10 @@ final class NetherNetTransport implements NameableTransport{
 		}catch(\InvalidArgumentException){
 
 		}
+	}
+
+	private function sendError(string $connectionId, int $recipientNetworkId, string $address, int $port, SignalErrorCode $code) : void{
+		$this->sendSignal(new Signal(Signal::TYPE_ERROR, $connectionId, (string) $code->value), $recipientNetworkId, $address, $port);
 	}
 
 	private function sendSignal(Signal $signal, int $recipientNetworkId, string $address, int $port) : void{

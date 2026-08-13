@@ -1,0 +1,71 @@
+<?php
+
+/*
+ *
+ *      _    _ _
+ *     / \  | | |_ __ _ _   _
+ *    / _ \ | | __/ _` | | | |
+ *   / ___ \| | || (_| | |_| |
+ *  /_/   \_\_|\__\__,_|\__, |
+ *                       |___/
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Original work by the PocketMine Team.
+ * https://www.pocketmine.net/
+ *
+ * @author Altay Team
+ * @link https://github.com/altayofficial
+ */
+
+declare(strict_types=1);
+
+namespace altay\network\nethernet\types;
+
+/**
+ * Codes carried in the data of a CONNECTERROR signal. Both ends use them to report why a
+ * negotiation or an established connection failed.
+ */
+enum SignalErrorCode : int
+{
+    case NONE = 0;
+    case DESTINATION_NOT_LOGGED_IN = 1;
+    case NEGOTIATION_TIMEOUT = 2;
+    case WRONG_TRANSPORT_VERSION = 3;
+    case FAILED_TO_CREATE_PEER_CONNECTION = 4;
+    case ICE = 5;
+    case CONNECT_REQUEST = 6;
+    case CONNECT_RESPONSE = 7;
+    case CANDIDATE_ADD = 8;
+    case INACTIVITY_TIMEOUT = 9;
+    case FAILED_TO_CREATE_OFFER = 10;
+    case FAILED_TO_CREATE_ANSWER = 11;
+    case FAILED_TO_SET_LOCAL_DESCRIPTION = 12;
+    case FAILED_TO_SET_REMOTE_DESCRIPTION = 13;
+    case NEGOTIATION_TIMEOUT_WAITING_FOR_RESPONSE = 14;
+    case NEGOTIATION_TIMEOUT_WAITING_FOR_ACCEPT = 15;
+    case INCOMING_CONNECTION_IGNORED = 16;
+    case SIGNALING_PARSING_FAILURE = 17;
+    case SIGNALING_UNKNOWN_ERROR = 18;
+    case SIGNALING_UNICAST_MESSAGE_DELIVERY_FAILED = 19;
+    case SIGNALING_BROADCAST_DELIVERY_FAILED = 20;
+    case SIGNALING_MESSAGE_DELIVERY_FAILED = 21;
+    case SIGNALING_TURN_AUTH_FAILED = 22;
+    case SIGNALING_FALLBACK_TO_BEST_EFFORT_DELIVERY = 23;
+    case NO_SIGNALING_CHANNEL = 24;
+    case NOT_LOGGED_IN = 25;
+    case SIGNALING_FAILED_TO_SEND = 26;
+    case RELAY_SERVER_CONFIGURATION_RESULT_FAILURE = 27;
+    case RELAY_SERVER_CONFIGURATION_RESULT_PARSING_ERROR_NO_URLS = 28;
+    case RELAY_SERVER_CONFIGURATION_RESULT_PARSING_ERROR_NO_CREDS = 29;
+    case RELAY_SERVER_CONFIGURATION_RESULT_PARSING_ERROR_NO_SERVERS = 30;
+    case RELAY_SERVER_CONFIGURATION_RESULT_PARSING_ERROR_NO_EXPIRATION = 31;
+    case DATA_CHANNEL_CLOSED = 32;
+    case INTERNAL_ERROR_JSON_SERIALIZATION = 33;
+    case INVALID_ARGUMENT = 34;
+    case GENERIC_FAILURE = 35;
+    case IDENTITY_VERIFICATION_FAILED = 37;
+}
