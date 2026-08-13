@@ -42,11 +42,11 @@ final class NetherNetSession implements TransportSession{
 
 	private bool $connected = true;
 	private bool $openNotified = false;
-	private string $receiveBuffer = "";
-	private int $pendingSegments = 0;
 	private ?string $authenticatedPublicKey = null;
 	private ?RTCDataChannel $reliableChannel = null;
 	private ?RTCDataChannel $unreliableChannel = null;
+	private MessageAssembler $reliableAssembler;
+	private MessageAssembler $unreliableAssembler;
 
 	private int $bytesSent = 0;
 	private int $bytesReceived = 0;
@@ -72,6 +72,8 @@ final class NetherNetSession implements TransportSession{
 		$this->closeHandler = $closeHandler;
 		$this->ackHandler = $ackHandler;
 		$this->createdAt = time();
+		$this->reliableAssembler = new MessageAssembler(true);
+		$this->unreliableAssembler = new MessageAssembler(false);
 	}
 
 	public function getId() : int{
@@ -117,8 +119,10 @@ final class NetherNetSession implements TransportSession{
 			}
 			$this->reliableChannel = $channel;
 			$channel->on("message", function(string $data) : void{
-				$this->handleMessage($data);
+				$this->handleMessage($data, $this->reliableAssembler);
 			});
+			//losing the reliable channel means losing the session; the unreliable one carries
+			//nothing the game depends on, so its closure is handled by the connection state instead
 			$channel->on("close", function() : void{
 				$this->onClosed();
 			});
@@ -129,6 +133,9 @@ final class NetherNetSession implements TransportSession{
 				return false;
 			}
 			$this->unreliableChannel = $channel;
+			$channel->on("message", function(string $data) : void{
+				$this->handleMessage($data, $this->unreliableAssembler);
+			});
 			return true;
 		}
 		return false;
@@ -174,34 +181,20 @@ final class NetherNetSession implements TransportSession{
 		return $this->reliableChannel;
 	}
 
-	private function handleMessage(string $data) : void{
+	private function handleMessage(string $data, MessageAssembler $assembler) : void{
 		if(!$this->connected){
 			return;
 		}
 		$this->bytesReceived += strlen($data);
-		if(strlen($data) < 2){
-			//a segment always carries the counter byte plus at least one payload byte
-			$this->closeWithError("received a message without a payload");
+		try{
+			$packet = $assembler->push($data);
+		}catch(MessageFormatException $e){
+			$this->closeWithError($e->getMessage());
 			return;
 		}
-
-		//each segment is prefixed with the number of segments still to come, counting down to zero.
-		//an unexpected counter means the message can never be completed, so the peer is dropped instead
-		//of buffering data indefinitely
-		$remaining = ord($data[0]);
-		if($this->pendingSegments > 0 && $this->pendingSegments - 1 !== $remaining){
-			$this->closeWithError("expected segment counter " . ($this->pendingSegments - 1) . ", got $remaining");
-			return;
+		if($packet !== null){
+			($this->packetHandler)($packet);
 		}
-		$this->pendingSegments = $remaining;
-		$this->receiveBuffer .= substr($data, 1);
-		if($remaining > 0){
-			return;
-		}
-
-		$packet = $this->receiveBuffer;
-		$this->receiveBuffer = "";
-		($this->packetHandler)($packet);
 	}
 
 	private function closeWithError(string $reason) : void{
@@ -220,14 +213,35 @@ final class NetherNetSession implements TransportSession{
 		}
 		$remaining = $segments - 1;
 		for($offset = 0; $offset === 0 || $offset < $length; $offset += self::MAX_MESSAGE_SIZE){
-			$segment = chr($remaining) . substr($payload, $offset, self::MAX_MESSAGE_SIZE);
-			$this->reliableChannel->send($segment);
-			$this->bytesSent += strlen($segment);
+			$this->sendSegment($this->reliableChannel, $remaining, substr($payload, $offset, self::MAX_MESSAGE_SIZE));
 			$remaining--;
 		}
 		if($receiptId !== null){
 			($this->ackHandler)($receiptId);
 		}
+	}
+
+	/**
+	 * Sends a packet over the unreliable channel, which the game itself does not currently use.
+	 *
+	 * The payload cannot be split: a dropped segment would strand the rest, so anything larger than
+	 * a single message is rejected rather than sent in a form the peer could never reassemble.
+	 */
+	public function sendUnreliablePacket(string $payload) : void{
+		if(!$this->connected || $this->unreliableChannel === null){
+			return;
+		}
+		$length = strlen($payload);
+		if($length > self::MAX_MESSAGE_SIZE){
+			throw new \InvalidArgumentException("Payload of $length bytes exceeds the " . self::MAX_MESSAGE_SIZE . " byte limit of the unreliable channel");
+		}
+		$this->sendSegment($this->unreliableChannel, 0, $payload);
+	}
+
+	private function sendSegment(RTCDataChannel $channel, int $remaining, string $payload) : void{
+		$segment = chr($remaining) . $payload;
+		$channel->send($segment);
+		$this->bytesSent += strlen($segment);
 	}
 
 	public function disconnect() : void{
