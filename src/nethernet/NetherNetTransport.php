@@ -44,6 +44,7 @@ use function React\Promise\set_rejection_handler;
 use Webrtc\DataChannel\RTCDataChannel;
 use Webrtc\ICE\RTCIceCandidate;
 use Webrtc\SDP\RTCSessionDescription;
+use Webrtc\Webrtc\Enum\ConnectionState;
 use Webrtc\Webrtc\RTCPeerConnection;
 
 final class NetherNetTransport implements NameableTransport{
@@ -327,6 +328,16 @@ final class NetherNetTransport implements NameableTransport{
 
 		$connection->on("datachannel", function(RTCDataChannel $channel) use ($connectionId, $sessionId, $address, $port, $connection) : void{
 			$this->handleDataChannel($connection, $channel, $connectionId, $sessionId, $address, $port);
+		});
+
+		//the aggregate connection state covers both the ICE and the DTLS transports. Without this a
+		//peer that goes away mid-handshake, or whose ICE later fails, would sit around until the
+		//pending negotiation times out - and an established session would never be torn down at all
+		$connection->on("connectionstatechange", function() use ($connection, $connectionId) : void{
+			$state = $connection->getConnectionState();
+			if($state === ConnectionState::failed || $state === ConnectionState::closed){
+				$this->dropConnection($connectionId, "peer connection " . $state->name);
+			}
 		});
 
 		$offer = $signal->data;
