@@ -32,6 +32,7 @@ use altay\network\nethernet\discovery\DiscoveryResponsePacket;
 use altay\network\nethernet\auth\ClientIdentityAssertion;
 use altay\network\nethernet\auth\IdentityException;
 use altay\network\nethernet\auth\ServerIdentity;
+use altay\network\nethernet\sdp\AnswerRewriter;
 use altay\network\nethernet\sdp\IceCandidate;
 use altay\network\nethernet\sdp\SessionDescription;
 use altay\network\nethernet\types\SignalErrorCode;
@@ -368,7 +369,7 @@ final class NetherNetTransport implements NameableTransport{
 					$this->dropConnection($connectionId, "no local description", SignalErrorCode::FAILED_TO_SET_LOCAL_DESCRIPTION);
 					return;
 				}
-				$sdp = $local->getSdp();
+				$sdp = AnswerRewriter::conform($local->getSdp());
 				$this->logger->debug("Sending answer for connection $connectionId");
 				$this->sendSignal(new Signal(Signal::TYPE_ANSWER, $connectionId, $this->withIdentityAttribute($sdp)), $senderNetworkId, $address, $port);
 				$this->trickleCandidates($sdp, $connectionId, $senderNetworkId, $address, $port);

@@ -25,6 +25,7 @@ declare(strict_types=1);
 
 namespace altay\network\nethernet;
 
+use altay\network\nethernet\sdp\AnswerRewriter;
 use altay\network\transport\TransportSession;
 use Webrtc\DataChannel\Enum\State;
 use Webrtc\DataChannel\RTCDataChannel;
@@ -35,7 +36,8 @@ final class NetherNetSession implements TransportSession{
 	public const RELIABLE_CHANNEL = "ReliableDataChannel";
 	public const UNRELIABLE_CHANNEL = "UnreliableDataChannel";
 
-	private const MAX_MESSAGE_SIZE = 262143;
+	//one byte of the advertised maximum is spent on the segment counter
+	private const MAX_MESSAGE_SIZE = AnswerRewriter::MAX_MESSAGE_SIZE - 1;
 	private const MAX_SEGMENTS = 256;
 
 	private bool $connected = true;
