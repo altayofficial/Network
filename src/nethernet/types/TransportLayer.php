@@ -28,5 +28,6 @@ namespace altay\network\nethernet\types;
 enum TransportLayer : int
 {
     case RAKNET = 0;
-    case NETHERNET = 1;
+    case NETHERNET = 2;
+    case DEFAULT = 4; // lol what
 }

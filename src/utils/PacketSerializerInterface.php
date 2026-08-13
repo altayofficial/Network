@@ -23,30 +23,16 @@
 
 declare(strict_types=1);
 
-namespace altay\network\nethernet\discovery;
+namespace altay\network\utils;
 
-use altay\network\nethernet\PacketSerializer;
+use pocketmine\utils\BinaryDataException;
 
-final class DiscoveryMessagePacket extends DiscoveryPacket{
+interface PacketSerializerInterface{
 
-	public const ID = 0x02;
+	/**
+	 * @throws BinaryDataException
+	 */
+	public function getString() : string; // why only string? because it's wire-different with RakNet and NetherNet but common functions so we use it
 
-	public function __construct(
-		public int $recipientId = 0,
-		public string $data = ""
-	){}
-
-	public function getId() : int{
-		return self::ID;
-	}
-
-	public function encodePayload(PacketSerializer $out) : void{
-		$out->putLLong($this->recipientId);
-		$out->putByteArray($this->data);
-	}
-
-	public function decodePayload(PacketSerializer $in) : void{
-		$this->recipientId = $in->getLLong();
-		$this->data = $in->getByteArray();
-	}
+	public function putString(string $v) : void;
 }

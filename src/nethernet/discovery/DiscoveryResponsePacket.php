@@ -25,7 +25,7 @@ declare(strict_types=1);
 
 namespace altay\network\nethernet\discovery;
 
-use pocketmine\utils\BinaryStream;
+use altay\network\nethernet\PacketSerializer;
 
 final class DiscoveryResponsePacket extends DiscoveryPacket{
 
@@ -39,18 +39,11 @@ final class DiscoveryResponsePacket extends DiscoveryPacket{
 		return self::ID;
 	}
 
-	public function encodePayload(BinaryStream $out) : void{
-		$hex = bin2hex($this->applicationData);
-		$out->putLInt(strlen($hex));
-		$out->put($hex);
+	public function encodePayload(PacketSerializer $out) : void{
+		$out->putHexByteArray($this->applicationData);
 	}
 
-	public function decodePayload(BinaryStream $in) : void{
-		$length = $in->getLInt();
-		$data = hex2bin($in->get($length));
-		if($data === false){
-			throw new \InvalidArgumentException("Invalid hex-encoded application data");
-		}
-		$this->applicationData = $data;
+	public function decodePayload(PacketSerializer $in) : void{
+		$this->applicationData = $in->getHexByteArray();
 	}
 }

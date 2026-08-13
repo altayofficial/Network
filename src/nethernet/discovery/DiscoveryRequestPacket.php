@@ -25,7 +25,7 @@ declare(strict_types=1);
 
 namespace altay\network\nethernet\discovery;
 
-use pocketmine\utils\BinaryStream;
+use altay\network\nethernet\PacketSerializer;
 
 final class DiscoveryRequestPacket extends DiscoveryPacket{
 
@@ -35,11 +35,11 @@ final class DiscoveryRequestPacket extends DiscoveryPacket{
 		return self::ID;
 	}
 
-	public function encodePayload(BinaryStream $out) : void{
-        // pretty empty packet
+	public function encodePayload(PacketSerializer $out) : void{
+		// pretty empty packet
 	}
 
-	public function decodePayload(BinaryStream $in) : void{
-        // pretty empty packet
+	public function decodePayload(PacketSerializer $in) : void{
+		// pretty empty packet
 	}
 }

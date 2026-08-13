@@ -19,6 +19,7 @@ namespace altay\network\raknet\protocol;
 use pocketmine\utils\BinaryDataException;
 use pocketmine\utils\BinaryStream;
 use altay\network\raknet\utils\InternetAddress;
+use altay\network\utils\PacketSerializerInterface;
 use function assert;
 use function count;
 use function explode;
@@ -27,7 +28,7 @@ use function inet_pton;
 use function strlen;
 use const AF_INET6;
 
-final class PacketSerializer extends BinaryStream{
+final class PacketSerializer extends BinaryStream implements PacketSerializerInterface{
 
 	/**
 	 * @throws BinaryDataException

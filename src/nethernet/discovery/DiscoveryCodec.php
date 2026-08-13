@@ -26,8 +26,8 @@ declare(strict_types=1);
 namespace altay\network\nethernet\discovery;
 
 use altay\network\nethernet\DiscoveryCrypto;
+use altay\network\nethernet\PacketSerializer;
 use pocketmine\utils\BinaryDataException;
-use pocketmine\utils\BinaryStream;
 
 final class DiscoveryCodec{
 
@@ -39,7 +39,7 @@ final class DiscoveryCodec{
 	}
 
 	public static function marshal(DiscoveryPacket $packet, int $senderId) : string{
-		$body = new BinaryStream();
+		$body = new PacketSerializer();
 		$body->putLShort($packet->getId());
 		$body->putLLong($senderId);
 		$body->put(str_repeat("\x00", self::HEADER_PADDING));
@@ -64,8 +64,9 @@ final class DiscoveryCodec{
 		}
 
 		try{
-			$in = new BinaryStream($payload);
-			$in->getLShort();
+			$in = new PacketSerializer($payload);
+			$in->getLShort(); //length prefix, counts itself and pretty unused
+
 			$packetId = $in->getLShort();
 			$senderId = $in->getLLong();
 			$in->get(self::HEADER_PADDING);
@@ -80,6 +81,9 @@ final class DiscoveryCodec{
 				return null;
 			}
 			$packet->decodePayload($in);
+			if(!$in->feof()){
+				return null;
+			}
 		}catch(BinaryDataException | \InvalidArgumentException){
 			return null;
 		}
