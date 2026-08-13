@@ -15,12 +15,12 @@
   "require-dev": {
     "phpunit/phpunit": "^10.5",
     "phpstan/phpstan": "^2.0",
-    "altayofficial/webrtc-php81": "^1.0"
+    "altayofficial/webrtc": "^1.0"
   },
   "repositories": [
     {
       "type": "vcs",
-      "url": "https://github.com/altayofficial/webrtc-php81"
+      "url": "https://github.com/altayofficial/webrtc"
     }
   ],
   "autoload": {
@@ -34,7 +34,7 @@
     }
   },
   "suggest": {
-    "altayofficial/webrtc-php81": "Required for the NetherNet transport"
+    "altayofficial/webrtc": "Required for the NetherNet transport"
   },
   "scripts": {
     "test": "phpunit",

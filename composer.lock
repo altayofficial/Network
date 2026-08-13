@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "834b89cb6e12122ec173362794acbaac",
+    "content-hash": "3fb6a155060c249a6f43f1835a9db7dc",
     "packages": [
         {
             "name": "pocketmine/binaryutils",
@@ -164,17 +164,17 @@
     ],
     "packages-dev": [
         {
-            "name": "altayofficial/webrtc-php81",
+            "name": "altayofficial/webrtc",
             "version": "v1.0.0",
             "source": {
                 "type": "git",
-                "url": "https://github.com/altayofficial/webrtc-php81.git",
-                "reference": "37727b6469af7112b4d3369051c124383dcb3f92"
+                "url": "https://github.com/altayofficial/webrtc.git",
+                "reference": "858da2d9d1228024614bd7b695acef0f079ea8f6"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/altayofficial/webrtc-php81/zipball/37727b6469af7112b4d3369051c124383dcb3f92",
-                "reference": "37727b6469af7112b4d3369051c124383dcb3f92",
+                "url": "https://api.github.com/repos/altayofficial/webrtc/zipball/858da2d9d1228024614bd7b695acef0f079ea8f6",
+                "reference": "858da2d9d1228024614bd7b695acef0f079ea8f6",
                 "shasum": ""
             },
             "require": {
@@ -252,10 +252,10 @@
             ],
             "description": "PHP-WebRTC downgraded to run on PHP 8.1 and later. Generated - see tools/build.php.",
             "support": {
-                "source": "https://github.com/altayofficial/webrtc-php81/tree/v1.0.0",
-                "issues": "https://github.com/altayofficial/webrtc-php81/issues"
+                "source": "https://github.com/altayofficial/webrtc/tree/v1.0.0",
+                "issues": "https://github.com/altayofficial/webrtc/issues"
             },
-            "time": "2026-08-13T15:02:00+00:00"
+            "time": "2026-08-13T15:14:10+00:00"
         },
         {
             "name": "brick/math",
