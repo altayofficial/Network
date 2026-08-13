@@ -329,7 +329,11 @@ final class NetherNetTransport implements NameableTransport{
 			$this->handleDataChannel($connection, $channel, $connectionId, $sessionId, $address, $port);
 		});
 
-		$connection->setRemoteDescription(new RTCSessionDescription($signal->data, "offer"))
+		$offer = $signal->data;
+		$connection->setRemoteDescription(new RTCSessionDescription($offer, "offer"))
+			->then(function() use ($connection, $offer, $connectionId) : void{
+				$this->addSessionLevelCandidates($connection, $offer, $connectionId);
+			})
 			->then(fn() => $connection->createAnswer())
 			->then(fn(RTCSessionDescription $answer) => $connection->setLocalDescription($answer))
 			->then(function() use ($connection, $connectionId, $senderNetworkId, $address, $port) : void{
@@ -349,15 +353,37 @@ final class NetherNetTransport implements NameableTransport{
 			});
 	}
 
+	/**
+	 * Adds the candidates a peer placed above the first media description.
+	 *
+	 * setRemoteDescription() only picks up the ones attached to the media description, which is
+	 * where they normally live. A peer that negotiates without trickle ICE may put them at the
+	 * session level instead, and those would otherwise be dropped.
+	 */
+	private function addSessionLevelCandidates(RTCPeerConnection $connection, string $sdp, string $connectionId) : void{
+		foreach(IceCandidate::parseAll(SessionDescription::sessionSection($sdp)) as $candidate){
+			$this->addCandidate($connection, $candidate, $connectionId);
+		}
+	}
+
 	private function handleCandidate(Signal $signal) : void{
 		$entry = $this->pending[$signal->connectionId] ?? null;
 		if($entry === null){
 			return;
 		}
+		$candidate = IceCandidate::parse($signal->data);
+		if($candidate === null){
+			$this->logger->debug("Ignoring malformed ICE candidate for connection $signal->connectionId");
+			return;
+		}
+		$this->addCandidate($entry["connection"], $candidate, $signal->connectionId);
+	}
+
+	private function addCandidate(RTCPeerConnection $connection, IceCandidate $candidate, string $connectionId) : void{
 		try{
-			$entry["connection"]->addIceCandidate(RTCIceCandidate::parseSDP($signal->data));
+			$connection->addIceCandidate(RTCIceCandidate::parseSDP($candidate->toSdpValue()));
 		}catch(\Throwable $e){
-			$this->logger->debug("Ignoring invalid ICE candidate for connection $signal->connectionId: " . $e->getMessage());
+			$this->logger->debug("Ignoring invalid ICE candidate for connection $connectionId: " . $e->getMessage());
 		}
 	}
 

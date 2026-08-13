@@ -72,6 +72,24 @@ final class IceCandidateTest extends TestCase{
 		self::assertStringNotContainsString("raddr", $candidate->format(0, "x"));
 	}
 
+	/**
+	 * The WebRTC library's parseSDP() reads the first space-separated field as the foundation, so
+	 * the 'candidate:' prefix has to be gone by the time it sees the value.
+	 */
+	public function testSdpValueDropsThePrefix() : void{
+		$candidate = IceCandidate::parse("a=candidate:1467250027 1 udp 2122260223 192.168.0.196 46243 typ host generation 0 ufrag 4ZcD");
+
+		self::assertNotNull($candidate);
+		self::assertSame("1467250027 1 udp 2122260223 192.168.0.196 46243 typ host", $candidate->toSdpValue());
+	}
+
+	public function testSdpValueKeepsRelatedAddress() : void{
+		$candidate = IceCandidate::parse("candidate:4 1 udp 168 1.2.3.4 51772 typ relay raddr 192.168.0.196 rport 51772");
+
+		self::assertNotNull($candidate);
+		self::assertSame("4 1 udp 168 1.2.3.4 51772 typ relay raddr 192.168.0.196 rport 51772", $candidate->toSdpValue());
+	}
+
 	public function testParseAllKeepsSdpOrder() : void{
 		$sdp = implode("\r\n", [
 			"v=0",

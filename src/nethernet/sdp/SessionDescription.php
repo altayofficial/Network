@@ -26,6 +26,7 @@ declare(strict_types=1);
 namespace altay\network\nethernet\sdp;
 
 use function explode;
+use function implode;
 use function str_starts_with;
 use function strlen;
 use function substr;
@@ -41,6 +42,24 @@ final class SessionDescription{
 
 	private function __construct(){
 
+	}
+
+	/**
+	 * Returns the part of an SDP above the first media description.
+	 *
+	 * Attributes are scoped: those below an 'm=' line belong to that media description, those above
+	 * it apply to the session. The WebRTC library only ingests candidates attached to a media
+	 * description, so the session level has to be read separately.
+	 */
+	public static function sessionSection(string $sdp) : string{
+		$lines = [];
+		foreach(explode("\n", $sdp) as $line){
+			if(str_starts_with(trim($line), "m=")){
+				break;
+			}
+			$lines[] = $line;
+		}
+		return implode("\n", $lines);
 	}
 
 	/**

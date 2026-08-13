@@ -120,11 +120,22 @@ final class IceCandidate{
 	 * because NetherNet only ever negotiates a single RTP component.
 	 */
 	public function format(int $networkId, string $ufrag) : string{
-		$out = "candidate:$this->foundation 1 $this->protocol $this->priority $this->address $this->port typ $this->type ";
+		return "candidate:" . $this->toSdpValue() . " generation 0 ufrag $ufrag network-id $networkId network-cost 0";
+	}
+
+	/**
+	 * Renders the candidate without the 'candidate:' prefix and without the vanilla trailer.
+	 *
+	 * This is the shape the WebRTC library's own parser expects - it splits on spaces and reads
+	 * the first field as the foundation, so feeding it a prefixed line silently produces a
+	 * foundation of 'candidate:<foundation>'.
+	 */
+	public function toSdpValue() : string{
+		$out = "$this->foundation 1 $this->protocol $this->priority $this->address $this->port typ $this->type";
 		if($this->relatedAddress !== null && $this->relatedPort !== null && in_array($this->type, self::RELATED_TYPES, true)){
-			$out .= "raddr $this->relatedAddress rport $this->relatedPort ";
+			$out .= " raddr $this->relatedAddress rport $this->relatedPort";
 		}
-		return $out . "generation 0 ufrag $ufrag network-id $networkId network-cost 0";
+		return $out;
 	}
 
 	private static function normaliseProtocol(string $protocol) : string{
