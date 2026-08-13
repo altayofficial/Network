@@ -48,6 +48,7 @@ final class NetherNetSession implements TransportSession{
 
 	private int $bytesSent = 0;
 	private int $bytesReceived = 0;
+	private int $createdAt;
 
 	/** @var \Closure(string) : void */
 	private \Closure $packetHandler;
@@ -68,6 +69,7 @@ final class NetherNetSession implements TransportSession{
 		$this->packetHandler = $packetHandler;
 		$this->closeHandler = $closeHandler;
 		$this->ackHandler = $ackHandler;
+		$this->createdAt = time();
 	}
 
 	public function getId() : int{
@@ -130,8 +132,25 @@ final class NetherNetSession implements TransportSession{
 		return false;
 	}
 
+	/**
+	 * A session is only usable once the peer has opened both of its data channels - vanilla always
+	 * opens the pair, and reporting the session before the unreliable one exists would hand out a
+	 * half-negotiated connection.
+	 */
 	public function isReady() : bool{
-		return $this->reliableChannel !== null && $this->reliableChannel->getReadyState() === State::Open;
+		return self::isChannelOpen($this->reliableChannel) && self::isChannelOpen($this->unreliableChannel);
+	}
+
+	private static function isChannelOpen(?RTCDataChannel $channel) : bool{
+		return $channel !== null && $channel->getReadyState() === State::Open;
+	}
+
+	public function getCreatedAt() : int{
+		return $this->createdAt;
+	}
+
+	public function isOpenNotified() : bool{
+		return $this->openNotified;
 	}
 
 	public function setAuthenticatedPublicKey(?string $publicKeyBase64) : void{

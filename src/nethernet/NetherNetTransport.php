@@ -164,6 +164,7 @@ final class NetherNetTransport implements NameableTransport{
 		if($now - $this->lastMaintenance >= self::MAINTENANCE_INTERVAL){
 			$this->lastMaintenance = $now;
 			$this->expireStalePending($now);
+			$this->expireUnreadySessions($now);
 			$this->reportBandwidth();
 		}
 	}
@@ -173,6 +174,20 @@ final class NetherNetTransport implements NameableTransport{
 			if($now - $entry["createdAt"] >= self::PENDING_NEGOTIATION_TIMEOUT){
 				$this->logger->debug("Dropping stale pending negotiation $connectionId from " . $entry["address"] . ":" . $entry["port"]);
 				$this->dropConnection($connectionId, "negotiation timed out", SignalErrorCode::NEGOTIATION_TIMEOUT_WAITING_FOR_ACCEPT);
+			}
+		}
+	}
+
+	/**
+	 * A session leaves the pending list as soon as its first data channel arrives, so it is no
+	 * longer covered by expireStalePending(). A peer that opens one channel and then stops would
+	 * otherwise occupy a session slot forever, since the session never becomes ready.
+	 */
+	private function expireUnreadySessions(int $now) : void{
+		foreach($this->sessions as $sessionId => $session){
+			if(!$session->isOpenNotified() && $now - $session->getCreatedAt() >= self::PENDING_NEGOTIATION_TIMEOUT){
+				$this->logger->debug("Dropping session $sessionId, its data channels did not open in time");
+				$this->closeSession($sessionId, "data channels did not open in time");
 			}
 		}
 	}
@@ -433,19 +448,18 @@ final class NetherNetTransport implements NameableTransport{
 			return;
 		}
 
-		if($channel->getLabel() === NetherNetSession::RELIABLE_CHANNEL){
-			$notifyOpen = function() use ($sessionId) : void{
-				$session = $this->sessions[$sessionId] ?? null;
-				if($session !== null && $session->markOpenNotified()){
-					$this->listener?->onSessionOpen($this, $session);
-				}
-			};
-			//inbound channels may already be open by the time the datachannel event fires
-			if($session->isReady()){
-				$notifyOpen();
-			}else{
-				$channel->on("open", $notifyOpen);
+		$notifyOpen = function() use ($sessionId) : void{
+			$session = $this->sessions[$sessionId] ?? null;
+			if($session !== null && $session->isReady() && $session->markOpenNotified()){
+				$this->listener?->onSessionOpen($this, $session);
 			}
+		};
+		//both channels have to be open before the session is usable, and either of them may already
+		//be open by the time its datachannel event fires
+		if($session->isReady()){
+			$notifyOpen();
+		}else{
+			$channel->on("open", $notifyOpen);
 		}
 	}
 
