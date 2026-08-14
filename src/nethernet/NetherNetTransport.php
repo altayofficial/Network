@@ -61,7 +61,7 @@ final class NetherNetTransport implements NameableTransport{
 	private ?TransportListener $listener = null;
 	private ?ServerIdentity $identity = null;
 
-	/** @var array<string, array{connection: RTCPeerConnection, networkId: int, address: string, port: int, publicKey: ?string, createdAt: int, outgoing: bool}> */
+	/** @var array<string, array{connection: RTCPeerConnection, networkId: int, address: string, port: int, publicKey: ?string, createdAt: int, outgoing: bool, sink: SignalSink}> */
 	private array $pending = [];
 	/** @var NetherNetSession[] */
 	private array $sessions = [];
@@ -326,6 +326,21 @@ final class NetherNetTransport implements NameableTransport{
 	}
 
 	private function handleOffer(Signal $signal, int $senderNetworkId, string $address, int $port) : void{
+		$this->acceptOffer($signal, $senderNetworkId, $address, $port, new DatagramSignalSink(
+			fn(Signal $out, int $networkId, string $host, int $peerPort) => $this->sendSignal($out, $networkId, $host, $peerPort),
+			$senderNetworkId,
+			$address,
+			$port
+		));
+	}
+
+	/**
+	 * Negotiates an incoming offer, writing every signal it produces to the given sink.
+	 *
+	 * Offers reach a transport over more than one channel - the discovery socket on a LAN, an HTTP
+	 * request from an endpoint - and the reply has to go back the way it came.
+	 */
+	public function acceptOffer(Signal $signal, int $senderNetworkId, string $address, int $port, SignalSink $sink) : void{
 		$connectionId = $signal->connectionId;
 		try{
 			$sessionId = Uint64::toSignedInt($connectionId);
@@ -341,12 +356,12 @@ final class NetherNetTransport implements NameableTransport{
 			$assertion?->verify($signal->data);
 		}catch(IdentityException $e){
 			$this->logger->info("Rejecting connection $connectionId from $address:$port: invalid identity assertion: " . $e->getMessage());
-			$this->sendError($connectionId, $senderNetworkId, $address, $port, SignalErrorCode::IDENTITY_VERIFICATION_FAILED);
+			$sink->write(self::errorSignal($connectionId, SignalErrorCode::IDENTITY_VERIFICATION_FAILED));
 			return;
 		}
 		if($assertion === null && $this->requireIdentity){
 			$this->logger->info("Rejecting connection $connectionId from $address:$port: identity assertion required but not provided");
-			$this->sendError($connectionId, $senderNetworkId, $address, $port, SignalErrorCode::IDENTITY_VERIFICATION_FAILED);
+			$sink->write(self::errorSignal($connectionId, SignalErrorCode::IDENTITY_VERIFICATION_FAILED));
 			return;
 		}
 
@@ -354,7 +369,7 @@ final class NetherNetTransport implements NameableTransport{
 			$connection = $this->createPeerConnection();
 		}catch(\Throwable $e){
 			$this->logger->error("Failed to create peer connection: " . $e->getMessage());
-			$this->sendError($connectionId, $senderNetworkId, $address, $port, SignalErrorCode::FAILED_TO_CREATE_PEER_CONNECTION);
+			$sink->write(self::errorSignal($connectionId, SignalErrorCode::FAILED_TO_CREATE_PEER_CONNECTION));
 			return;
 		}
 		$this->logger->debug("Incoming NetherNet connection $connectionId from $address:$port (network ID $senderNetworkId)");
@@ -365,7 +380,8 @@ final class NetherNetTransport implements NameableTransport{
 			"port" => $port,
 			"publicKey" => $assertion?->getPublicKeyBase64(),
 			"createdAt" => time(),
-			"outgoing" => false
+			"outgoing" => false,
+			"sink" => $sink
 		];
 
 		$connection->on("datachannel", function(RTCDataChannel $channel) use ($connectionId, $sessionId, $address, $port, $connection) : void{
@@ -389,7 +405,7 @@ final class NetherNetTransport implements NameableTransport{
 			})
 			->then(fn() => $connection->createAnswer())
 			->then(fn(RTCSessionDescription $answer) => $connection->setLocalDescription($answer))
-			->then(function() use ($connection, $connectionId, $senderNetworkId, $address, $port) : void{
+			->then(function() use ($connection, $connectionId, $sink) : void{
 				$local = $connection->getLocalDescription();
 				if($local === null){
 					$this->dropConnection($connectionId, "no local description", SignalErrorCode::FAILED_TO_SET_LOCAL_DESCRIPTION);
@@ -397,8 +413,8 @@ final class NetherNetTransport implements NameableTransport{
 				}
 				$sdp = AnswerRewriter::conform($local->getSdp());
 				$this->logger->debug("Sending answer for connection $connectionId");
-				$this->sendSignal(new Signal(Signal::TYPE_ANSWER, $connectionId, $this->withIdentityAttribute($sdp)), $senderNetworkId, $address, $port);
-				$this->trickleCandidates($sdp, $connectionId, $senderNetworkId, $address, $port);
+				$sink->write(new Signal(Signal::TYPE_ANSWER, $connectionId, $this->withIdentityAttribute($sdp)));
+				$this->trickleCandidates($sdp, $connectionId, $sink);
 			})
 			->catch(function(\Throwable $e) use ($connectionId) : void{
 				$this->logger->error("NetherNet negotiation failed for connection $connectionId: " . $e->getMessage());
@@ -545,7 +561,7 @@ final class NetherNetTransport implements NameableTransport{
 		if($entry !== null){
 			unset($this->pending[$connectionId]);
 			if($code !== null){
-				$this->sendError($connectionId, $entry["networkId"], $entry["address"], $entry["port"], $code);
+				$entry["sink"]->write(self::errorSignal($connectionId, $code));
 			}
 			try{
 				$entry["connection"]->close();
@@ -591,6 +607,12 @@ final class NetherNetTransport implements NameableTransport{
 			throw new TransportException("Failed to create peer connection: " . $e->getMessage(), 0, $e);
 		}
 
+		$sink = new DatagramSignalSink(
+			fn(Signal $out, int $recipient, string $host, int $peerPort) => $this->sendSignal($out, $recipient, $host, $peerPort),
+			$networkId,
+			$address,
+			$port
+		);
 		$this->pending[$connectionId] = [
 			"connection" => $connection,
 			"networkId" => $networkId,
@@ -598,7 +620,8 @@ final class NetherNetTransport implements NameableTransport{
 			"port" => $port,
 			"publicKey" => null,
 			"createdAt" => time(),
-			"outgoing" => true
+			"outgoing" => true,
+			"sink" => $sink
 		];
 		$connection->on("connectionstatechange", function() use ($connection, $connectionId) : void{
 			$state = $connection->getConnectionState();
@@ -625,7 +648,7 @@ final class NetherNetTransport implements NameableTransport{
 
 		$connection->createOffer()
 			->then(fn(RTCSessionDescription $offer) => $connection->setLocalDescription($offer))
-			->then(function() use ($connection, $connectionId, $networkId, $address, $port) : void{
+			->then(function() use ($connection, $connectionId, $networkId, $sink) : void{
 				$local = $connection->getLocalDescription();
 				if($local === null){
 					$this->dropConnection($connectionId, "no local description", SignalErrorCode::FAILED_TO_SET_LOCAL_DESCRIPTION);
@@ -633,8 +656,8 @@ final class NetherNetTransport implements NameableTransport{
 				}
 				$sdp = AnswerRewriter::conform($local->getSdp());
 				$this->logger->debug("Sending offer for connection $connectionId to network $networkId");
-				$this->sendSignal(new Signal(Signal::TYPE_OFFER, $connectionId, $this->withIdentityAttribute($sdp)), $networkId, $address, $port);
-				$this->trickleCandidates($sdp, $connectionId, $networkId, $address, $port);
+				$sink->write(new Signal(Signal::TYPE_OFFER, $connectionId, $this->withIdentityAttribute($sdp)));
+				$this->trickleCandidates($sdp, $connectionId, $sink);
 			})
 			->catch(function(\Throwable $e) use ($connectionId) : void{
 				$this->logger->error("NetherNet dial failed for connection $connectionId: " . $e->getMessage());
@@ -712,8 +735,8 @@ final class NetherNetTransport implements NameableTransport{
 		return true;
 	}
 
-	private function sendError(string $connectionId, int $recipientNetworkId, string $address, int $port, SignalErrorCode $code) : void{
-		$this->sendSignal(new Signal(Signal::TYPE_ERROR, $connectionId, (string) $code->value), $recipientNetworkId, $address, $port);
+	private static function errorSignal(string $connectionId, SignalErrorCode $code) : Signal{
+		return new Signal(Signal::TYPE_ERROR, $connectionId, (string) $code->value);
 	}
 
 	private function sendSignal(Signal $signal, int $recipientNetworkId, string $address, int $port) : void{
@@ -746,14 +769,14 @@ final class NetherNetTransport implements NameableTransport{
 	 * the form the C++ WebRTC implementation produces, which carries a 'ufrag' and a per-candidate
 	 * 'network-id' that an SDP attribute does not have.
 	 */
-	private function trickleCandidates(string $sdp, string $connectionId, int $recipientNetworkId, string $address, int $port) : void{
+	private function trickleCandidates(string $sdp, string $connectionId, SignalSink $sink) : void{
 		$ufrag = SessionDescription::attribute($sdp, "ice-ufrag");
 		if($ufrag === null){
 			$this->logger->debug("Local description for connection $connectionId has no ice-ufrag, not signalling candidates");
 			return;
 		}
 		foreach(IceCandidate::parseAll($sdp) as $networkId => $candidate){
-			$this->sendSignal(new Signal(Signal::TYPE_CANDIDATE, $connectionId, $candidate->format($networkId, $ufrag)), $recipientNetworkId, $address, $port);
+			$sink->write(new Signal(Signal::TYPE_CANDIDATE, $connectionId, $candidate->format($networkId, $ufrag)));
 		}
 	}
 }
