@@ -13,9 +13,10 @@ use PHPUnit\Framework\TestCase;
 
  /*
  * @group integration
- * @requires extension ffi
  */
 final class DialRoundTripTest extends TestCase{
+
+	use RequiresPeerConnection;
 
 	private const LISTEN_PORT = 17551;
 	private const DIAL_PORT = 17552;
@@ -26,7 +27,9 @@ final class DialRoundTripTest extends TestCase{
 	private ?NetherNetTransport $listening = null;
 	private ?NetherNetTransport $dialling = null;
 
-
+	protected function setUp() : void{
+		$this->requirePeerConnection();
+	}
 
 	protected function tearDown() : void{
 		$this->dialling?->shutdown();

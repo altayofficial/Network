@@ -10,12 +10,15 @@ use altay\network\nethernet\NetherNetTransport;
 use altay\network\nethernet\ServerData;
 use altay\network\tests\nethernet\DiscardingLogger;
 use altay\network\tests\nethernet\RecordingListener;
+use altay\network\tests\nethernet\RequiresPeerConnection;
 use PHPUnit\Framework\TestCase;
 use React\EventLoop\Loop;
 use React\Http\HttpServer;
 use React\Socket\SocketServer;
 
 final class EndpointRoundTripTest extends TestCase{
+
+	use RequiresPeerConnection;
 
 	private const HTTP_PORT = 17553;
 	private const TRANSPORT_PORT = 17554;
@@ -36,9 +39,9 @@ final class EndpointRoundTripTest extends TestCase{
 
 	/**
 	 * @group integration
-	 * @requires extension ffi
 	 */
 	public function testOfferPostedOverHttpEstablishesASession() : void{
+		$this->requirePeerConnection();
 		$logger = new DiscardingLogger();
 
 		$serverEvents = new RecordingListener();
