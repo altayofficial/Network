@@ -30,13 +30,6 @@ use function is_int;
 use function json_decode;
 use function time;
 
-/**
- * The STUN and TURN servers a peer connection may gather candidates from.
- *
- * On LAN discovery there are none - peers reach each other directly. They matter for signalling
- * over Minecraft's own service, which hands these out with a short lifetime so a relayed connection
- * can be established between networks that cannot see each other.
- */
 final class Credentials{
 
 	/**
@@ -52,8 +45,6 @@ final class Credentials{
 	}
 
 	/**
-	 * Reads the payload Minecraft's signalling service sends. Field names are theirs.
-	 *
 	 * @throws \InvalidArgumentException
 	 */
 	public static function fromJson(string $json, ?int $now = null) : self{
@@ -88,8 +79,6 @@ final class Credentials{
 	}
 
 	/**
-	 * Builds the configuration array the WebRTC library takes for a peer connection.
-	 *
 	 * @return array{iceServers: list<array{urls: string[], username?: string, credential?: string}>}
 	 */
 	public function toPeerConnectionConfiguration() : array{

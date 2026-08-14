@@ -32,25 +32,12 @@ use function strlen;
 use function substr;
 use function trim;
 
-/**
- * Minimal reader for the SDP attributes NetherNet negotiation needs.
- *
- * The WebRTC library owns parsing for everything it consumes; this only picks out the handful of
- * values that have to be read back out of a description to build signals.
- */
 final class SessionDescription{
 
 	private function __construct(){
 
 	}
 
-	/**
-	 * Returns the part of an SDP above the first media description.
-	 *
-	 * Attributes are scoped: those below an 'm=' line belong to that media description, those above
-	 * it apply to the session. The WebRTC library only ingests candidates attached to a media
-	 * description, so the session level has to be read separately.
-	 */
 	public static function sessionSection(string $sdp) : string{
 		$lines = [];
 		foreach(explode("\n", $sdp) as $line){
@@ -62,9 +49,6 @@ final class SessionDescription{
 		return implode("\n", $lines);
 	}
 
-	/**
-	 * Returns the value of the first 'a=<key>:<value>' attribute, or null when it is absent.
-	 */
 	public static function attribute(string $sdp, string $key) : ?string{
 		foreach(self::attributes($sdp, $key) as $value){
 			return $value;
@@ -73,8 +57,6 @@ final class SessionDescription{
 	}
 
 	/**
-	 * Returns the values of every 'a=<key>:<value>' attribute, in the order they appear.
-	 *
 	 * @return string[]
 	 */
 	public static function attributes(string $sdp, string $key) : array{

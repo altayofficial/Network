@@ -32,21 +32,10 @@ use function is_string;
 use function str_pad;
 use function strlen;
 
-/**
- * Converts an EC public key given as a JSON Web Key into the same base64 encoded PKIX form a peer
- * would have sent as a plain string.
- *
- * The 'cpk' claim carries either shape. Normalising to PKIX here keeps a single representation in
- * the rest of the identity code, which hands the value to OpenSSL wrapped in a PEM header.
- */
 final class JwkPublicKey{
 
-	/** OID 1.2.840.10045.2.1 - id-ecPublicKey */
 	private const OID_EC_PUBLIC_KEY = "\x06\x07\x2a\x86\x48\xce\x3d\x02\x01";
 
-	/**
-	 * Named curve OID and the exact size of one coordinate, keyed by the JWK 'crv' value.
-	 */
 	private const CURVES = [
 		//1.2.840.10045.3.1.7 - prime256v1
 		"P-256" => ["\x06\x08\x2a\x86\x48\xce\x3d\x03\x01\x07", 32],

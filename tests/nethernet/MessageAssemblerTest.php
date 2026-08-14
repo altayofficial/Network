@@ -32,10 +32,6 @@ final class MessageAssemblerTest extends TestCase{
 		self::assertSame("ef", $assembler->push("\x00ef"));
 	}
 
-	/**
-	 * A counter that does not continue the sequence can never complete the packet, so the buffer
-	 * would grow for as long as the peer kept sending.
-	 */
 	public function testRejectsBrokenSegmentSequence() : void{
 		$assembler = new MessageAssembler(true);
 		$assembler->push("\x03abc");

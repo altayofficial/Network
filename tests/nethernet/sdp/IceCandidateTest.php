@@ -40,9 +40,6 @@ final class IceCandidateTest extends TestCase{
 		self::assertNull(IceCandidate::parse("candidate:1 1 udp notanumber 10.0.0.1 5000 typ host"));
 	}
 
-	/**
-	 * The expected strings are what go-nethernet's formatICECandidate produces for the same input.
-	 */
 	public function testFormatsLikeVanilla() : void{
 		$host = IceCandidate::parse("a=candidate:1467250027 1 udp 2122260223 192.168.0.196 46243 typ host");
 		self::assertNotNull($host);
@@ -72,10 +69,6 @@ final class IceCandidateTest extends TestCase{
 		self::assertStringNotContainsString("raddr", $candidate->format(0, "x"));
 	}
 
-	/**
-	 * The WebRTC library's parseSDP() reads the first space-separated field as the foundation, so
-	 * the 'candidate:' prefix has to be gone by the time it sees the value.
-	 */
 	public function testSdpValueDropsThePrefix() : void{
 		$candidate = IceCandidate::parse("a=candidate:1467250027 1 udp 2122260223 192.168.0.196 46243 typ host generation 0 ufrag 4ZcD");
 

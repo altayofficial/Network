@@ -29,9 +29,6 @@ use function array_values;
 use function is_array;
 use function is_string;
 
-/**
- * One STUN or TURN server, with the credentials it needs.
- */
 final class IceServer{
 
 	/**

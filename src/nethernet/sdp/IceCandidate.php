@@ -36,14 +36,6 @@ use function strtolower;
 use function substr;
 use function trim;
 
-/**
- * A single ICE candidate as it appears in an SDP or in a CANDIDATEADD signal.
- *
- * Vanilla signals candidates in the form produced by the C++ implementation of WebRTC, which
- * carries four trailing attributes ('generation', 'ufrag', 'network-id', 'network-cost') that
- * a plain SDP candidate line does not. Clients ignore candidates that lack them, so outgoing
- * candidates have to be rebuilt rather than copied out of the local description.
- */
 final class IceCandidate{
 
 	private const RELATED_TYPES = ["relay", "srflx"];
@@ -59,10 +51,6 @@ final class IceCandidate{
 		public ?int $relatedPort = null
 	){}
 
-	/**
-	 * Parses a candidate line. The leading 'a=' and the 'candidate:' prefix are both optional,
-	 * since signals and SDP attributes spell them differently.
-	 */
 	public static function parse(string $line) : ?self{
 		$line = trim($line);
 		if(str_starts_with($line, "a=")){
@@ -100,8 +88,6 @@ final class IceCandidate{
 	}
 
 	/**
-	 * Extracts every candidate attribute from an SDP, in the order they appear.
-	 *
 	 * @return self[]
 	 */
 	public static function parseAll(string $sdp) : array{
@@ -115,21 +101,10 @@ final class IceCandidate{
 		return $candidates;
 	}
 
-	/**
-	 * Renders the candidate the way the C++ WebRTC implementation does. The component is always 1
-	 * because NetherNet only ever negotiates a single RTP component.
-	 */
 	public function format(int $networkId, string $ufrag) : string{
 		return "candidate:" . $this->toSdpValue() . " generation 0 ufrag $ufrag network-id $networkId network-cost 0";
 	}
 
-	/**
-	 * Renders the candidate without the 'candidate:' prefix and without the vanilla trailer.
-	 *
-	 * This is the shape the WebRTC library's own parser expects - it splits on spaces and reads
-	 * the first field as the foundation, so feeding it a prefixed line silently produces a
-	 * foundation of 'candidate:<foundation>'.
-	 */
 	public function toSdpValue() : string{
 		$out = "$this->foundation 1 $this->protocol $this->priority $this->address $this->port typ $this->type";
 		if($this->relatedAddress !== null && $this->relatedPort !== null && in_array($this->type, self::RELATED_TYPES, true)){

@@ -29,14 +29,6 @@ use function ord;
 use function strlen;
 use function substr;
 
-/**
- * Rebuilds a packet from the segments received on one data channel.
- *
- * Every message carries a leading byte holding the number of segments still to come, counting down
- * to zero on the last one. Each channel keeps its own assembler - the counters of the reliable and
- * unreliable channels are independent, and sharing state between them would splice their payloads
- * together.
- */
 final class MessageAssembler{
 
 	private int $pendingSegments = 0;
@@ -52,8 +44,6 @@ final class MessageAssembler{
 	){}
 
 	/**
-	 * Returns the completed packet, or null while segments are still outstanding.
-	 *
 	 * @throws MessageFormatException when the message cannot belong to the sequence in progress.
 	 *         The caller is expected to drop the peer - a broken sequence can never complete, and
 	 *         continuing to buffer would let a peer grow the buffer without bound.

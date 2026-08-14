@@ -33,12 +33,6 @@ use function rtrim;
 use function sprintf;
 use function strlen;
 
-/**
- * Posts an SDP offer to a server that serves endpoint signalling, and returns its answer.
- *
- * Unlike LAN discovery, the remote network is addressed by URL rather than by ID - the server's ID
- * is its base URL, and the ID in the path is the one this side identifies itself with.
- */
 final class EndpointClient{
 
 	private Browser $browser;
@@ -55,8 +49,6 @@ final class EndpointClient{
 	}
 
 	/**
-	 * Sends the offer and resolves with the answer SDP.
-	 *
 	 * @param string $baseUrl the remote server's endpoint, for example https://example.com:443
 	 *
 	 * @return PromiseInterface<string>

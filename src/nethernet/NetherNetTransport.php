@@ -82,12 +82,6 @@ final class NetherNetTransport implements NameableTransport{
 		$this->addressBook = new AddressBook();
 	}
 
-	/**
-	 * Replaces the STUN/TURN servers used by connections negotiated from now on.
-	 *
-	 * Credentials issued by a signalling service expire, so they have to be refreshed rather than
-	 * fixed at construction. Connections already established keep the servers they were built with.
-	 */
 	public function setCredentials(?Credentials $credentials) : void{
 		$this->credentials = $credentials;
 	}
@@ -201,11 +195,6 @@ final class NetherNetTransport implements NameableTransport{
 		}
 	}
 
-	/**
-	 * A session leaves the pending list as soon as its first data channel arrives, so it is no
-	 * longer covered by expireStalePending(). A peer that opens one channel and then stops would
-	 * otherwise occupy a session slot forever, since the session never becomes ready.
-	 */
 	private function expireUnreadySessions(int $now) : void{
 		foreach($this->sessions as $sessionId => $session){
 			if(!$session->isOpenNotified() && $now - $session->getCreatedAt() >= self::PENDING_NEGOTIATION_TIMEOUT){
@@ -335,12 +324,6 @@ final class NetherNetTransport implements NameableTransport{
 		));
 	}
 
-	/**
-	 * Negotiates an incoming offer, writing every signal it produces to the given sink.
-	 *
-	 * Offers reach a transport over more than one channel - the discovery socket on a LAN, an HTTP
-	 * request from an endpoint - and the reply has to go back the way it came.
-	 */
 	public function acceptOffer(Signal $signal, int $senderNetworkId, string $address, int $port, SignalSink $sink) : void{
 		$connectionId = $signal->connectionId;
 		try{
@@ -423,25 +406,12 @@ final class NetherNetTransport implements NameableTransport{
 			});
 	}
 
-	/**
-	 * Adds the candidates a peer placed above the first media description.
-	 *
-	 * setRemoteDescription() only picks up the ones attached to the media description, which is
-	 * where they normally live. A peer that negotiates without trickle ICE may put them at the
-	 * session level instead, and those would otherwise be dropped.
-	 */
 	private function addSessionLevelCandidates(RTCPeerConnection $connection, string $sdp, string $connectionId) : void{
 		foreach(IceCandidate::parseAll(SessionDescription::sessionSection($sdp)) as $candidate){
 			$this->addCandidate($connection, $candidate, $connectionId);
 		}
 	}
 
-	/**
-	 * Finds the peer connection a signal belongs to.
-	 *
-	 * A connection stops being pending once its session exists, but ICE keeps trickling candidates
-	 * well past that point - looking only at the pending list would silently discard them.
-	 */
 	private function connectionFor(string $connectionId) : ?RTCPeerConnection{
 		$entry = $this->pending[$connectionId] ?? null;
 		if($entry !== null){
@@ -481,12 +451,6 @@ final class NetherNetTransport implements NameableTransport{
 		}
 	}
 
-	/**
-	 * Creates the session for a connection, or returns the one already registered for it.
-	 *
-	 * The peer that dials creates its own data channels rather than waiting for them to arrive, so
-	 * both directions need this without going through the datachannel event.
-	 */
 	private function openSession(RTCPeerConnection $connection, string $connectionId, int $sessionId, string $address, int $port) : NetherNetSession{
 		$session = $this->sessions[$sessionId] ?? null;
 		if($session !== null){
@@ -578,13 +542,6 @@ final class NetherNetTransport implements NameableTransport{
 	}
 
 	/**
-	 * Opens a connection to a remote network, which must already be in the address book - it lands
-	 * there as soon as the network broadcasts a discovery packet.
-	 *
-	 * Negotiation is inverted relative to an inbound connection: this side picks the connection ID,
-	 * creates both data channels itself, and sends the offer. The returned session is not usable
-	 * until the listener reports it open.
-	 *
 	 * @throws TransportException
 	 */
 	public function dial(int $networkId) : NetherNetSession{
@@ -603,11 +560,6 @@ final class NetherNetTransport implements NameableTransport{
 	}
 
 	/**
-	 * Opens a connection to a server that serves endpoint signalling over HTTP.
-	 *
-	 * The offer is posted rather than signalled, and the answer comes back on the same request, so
-	 * the connection has to be negotiated without trickling any candidates.
-	 *
 	 * @throws TransportException
 	 */
 	public function dialEndpoint(string $baseUrl, ?EndpointClient $client = null) : NetherNetSession{
@@ -707,9 +659,6 @@ final class NetherNetTransport implements NameableTransport{
 		return $session;
 	}
 
-	/**
-	 * Handles the answer to an offer this side sent.
-	 */
 	private function handleAnswer(Signal $signal) : void{
 		$entry = $this->pending[$signal->connectionId] ?? null;
 		if($entry === null || !$entry["outgoing"]){
@@ -746,10 +695,6 @@ final class NetherNetTransport implements NameableTransport{
 			});
 	}
 
-	/**
-	 * Expired credentials are dropped rather than used - a TURN server rejects them anyway, and
-	 * gathering then stalls until it times out instead of failing outright.
-	 */
 	private function createPeerConnection() : RTCPeerConnection{
 		if($this->credentials === null || $this->credentials->isExpired()){
 			if($this->credentials !== null){
@@ -761,10 +706,6 @@ final class NetherNetTransport implements NameableTransport{
 		return new RTCPeerConnection($this->credentials->toPeerConnectionConfiguration());
 	}
 
-	/**
-	 * Signals a network the transport has heard from, looking its address up rather than replying
-	 * to a datagram. Returns false when the network has not been seen, or has since expired.
-	 */
 	public function signalNetwork(Signal $signal, int $recipientNetworkId) : bool{
 		$target = $this->addressBook->lookup($recipientNetworkId);
 		if($target === null){
@@ -802,13 +743,6 @@ final class NetherNetTransport implements NameableTransport{
 		return substr($sdp, 0, $position) . "a=identity:$attribute\r\n" . substr($sdp, $position);
 	}
 
-	/**
-	 * Signals each locally gathered candidate separately.
-	 *
-	 * The candidates cannot be copied straight out of the local description - vanilla only accepts
-	 * the form the C++ WebRTC implementation produces, which carries a 'ufrag' and a per-candidate
-	 * 'network-id' that an SDP attribute does not have.
-	 */
 	private function trickleCandidates(string $sdp, string $connectionId, SignalSink $sink) : void{
 		$ufrag = SessionDescription::attribute($sdp, "ice-ufrag");
 		if($ufrag === null){

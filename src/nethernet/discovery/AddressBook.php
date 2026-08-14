@@ -28,14 +28,6 @@ namespace altay\network\nethernet\discovery;
 use function array_keys;
 use function count;
 
-/**
- * Remembers which UDP address each NetherNet network was last heard from.
- *
- * Signals name the network they are for, not an address, so anything that wants to reach a network
- * it is not already answering - a dialer, or a reply that outlives the datagram that triggered it -
- * has to look the address up here. Entries expire so a network that has left the LAN stops being a
- * target.
- */
 final class AddressBook{
 
 	/** @var array<int, array{address: string, port: int, seenAt: int}> */

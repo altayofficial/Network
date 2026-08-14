@@ -11,12 +11,7 @@ use altay\network\transport\TransportListener;
 use altay\network\transport\TransportSession;
 use PHPUnit\Framework\TestCase;
 
-/**
- * Drives a real connection between two transports in one process: one listens, the other dials it.
- *
- * Everything below the signalling - ICE, DTLS, SCTP, the data channels and the segmentation - only
- * runs when two peers actually negotiate, so this is the only test that exercises any of it.
- *
+ /*
  * @group integration
  * @requires extension ffi
  */
@@ -82,9 +77,6 @@ final class DialRoundTripTest extends TestCase{
 	}
 }
 
-/**
- * The transport logs the whole negotiation at debug level, which would drown the test output.
- */
 final class DiscardingLogger implements \Logger{
 	public function emergency($message){}
 	public function alert($message){}

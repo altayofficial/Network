@@ -34,24 +34,8 @@ use function str_contains;
 use function str_starts_with;
 use function trim;
 
-/**
- * Brings the answer produced by the WebRTC library in line with what vanilla emits.
- *
- * The library targets browsers, so a few of its defaults differ from the description a Bedrock
- * peer expects. Rewriting the finished SDP is preferable to patching the library, since these are
- * the only differences that matter and the values are not configurable through its API.
- */
 final class AnswerRewriter{
 
-	/**
-	 * The largest SCTP message either side will send: a full 256KB segment, one byte of which is
-	 * the segment counter.
-	 *
-	 * The library advertises 65536 because RTCSctpTransport::getCapabilities() hardcodes it, but
-	 * its reassembly buffer has no such limit. Under-reporting here would be actively harmful -
-	 * NetherNet peers segment at 262143 regardless of what the remote advertises, so a client would
-	 * still send messages this size and simply expect them to arrive.
-	 */
 	public const MAX_MESSAGE_SIZE = 262144;
 
 	private function __construct(){
@@ -97,8 +81,6 @@ final class AnswerRewriter{
 	}
 
 	/**
-	 * Vanilla always carries 'ice-options:trickle', even on connections that do not trickle.
-	 *
 	 * @param string[] $lines
 	 * @return string[]
 	 */

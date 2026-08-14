@@ -41,10 +41,6 @@ final class SessionDescriptionTest extends TestCase{
 		self::assertStringNotContainsString("a=ice-ufrag", $section);
 	}
 
-	/**
-	 * The library ingests media level candidates itself, so only the session level ones may be
-	 * added a second time - otherwise every candidate would be handed to ICE twice.
-	 */
 	public function testSessionSectionIsolatesSessionLevelCandidates() : void{
 		$candidates = IceCandidate::parseAll(SessionDescription::sessionSection(self::OFFER));
 

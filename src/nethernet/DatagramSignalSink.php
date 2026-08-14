@@ -25,9 +25,6 @@ declare(strict_types=1);
 
 namespace altay\network\nethernet;
 
-/**
- * Writes signals back out of the discovery socket, which is how LAN peers talk to each other.
- */
 final class DatagramSignalSink implements SignalSink{
 
 	/**

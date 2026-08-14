@@ -51,10 +51,6 @@ final class CredentialsTest extends TestCase{
 		self::assertFalse($credentials->isExpired(PHP_INT_MAX));
 	}
 
-	/**
-	 * The library reads credentialType through a non-nullable setter, so a configuration missing
-	 * that key fatals. Building a real RTCConfiguration is the only way to catch that.
-	 */
 	public function testConfigurationIsAcceptedByTheLibrary() : void{
 		$credentials = Credentials::fromJson(self::PAYLOAD, 1000);
 		$configuration = new RTCConfiguration($credentials->toPeerConnectionConfiguration());

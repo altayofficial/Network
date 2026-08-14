@@ -33,8 +33,6 @@ final class IdentityTest extends TestCase{
 	}
 
 	/**
-	 * Builds the JSON Web Key form of the client key, which is the other shape a cpk claim takes.
-	 *
 	 * @return array<string, string>
 	 */
 	private function clientJwk() : array{
@@ -94,10 +92,6 @@ final class IdentityTest extends TestCase{
 		self::assertNull(ClientIdentityAssertion::fromSdp($this->sdp($this->fingerprint("cert"))));
 	}
 
-	/**
-	 * A JWK cpk has to end up as the same PKIX key the string form carries, otherwise the
-	 * fingerprint signature could not be verified against it.
-	 */
 	public function testJwkPublicKeyIsAcceptedAndMatchesTheStringForm() : void{
 		$fp = $this->fingerprint("cert");
 		$offer = $this->buildClientOffer($fp, null, ["domain" => "test", "protocol" => "default"], $this->clientJwk());

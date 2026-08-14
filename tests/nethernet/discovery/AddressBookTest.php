@@ -40,10 +40,6 @@ final class AddressBookTest extends TestCase{
 		self::assertNull($book->lookup(42));
 	}
 
-	/**
-	 * A network that keeps being heard from must not expire, otherwise an active peer would drop
-	 * out of the book mid-session.
-	 */
 	public function testBeingSeenAgainRefreshesTheDeadline() : void{
 		$book = new AddressBook(60);
 		$book->remember(42, "10.0.0.1", 7551, 1000);

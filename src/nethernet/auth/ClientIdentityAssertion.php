@@ -82,12 +82,6 @@ final class ClientIdentityAssertion{
 	}
 
 	/**
-	 * Checks the identity provider block that accompanies the assertion.
-	 *
-	 * The protocol is always 'default' for NetherNet, and the domain names the issuer of the token -
-	 * Minecraft's authorization service for clients, 'self' for a self-signed server identity. An
-	 * assertion missing either is not one a vanilla peer would have produced.
-	 *
 	 * @throws IdentityException
 	 */
 	private static function checkIdentityProvider(mixed $idp) : void{

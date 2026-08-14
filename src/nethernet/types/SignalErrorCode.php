@@ -25,10 +25,6 @@ declare(strict_types=1);
 
 namespace altay\network\nethernet\types;
 
-/**
- * Codes carried in the data of a CONNECTERROR signal. Both ends use them to report why a
- * negotiation or an established connection failed.
- */
 enum SignalErrorCode : int
 {
     case NONE = 0;

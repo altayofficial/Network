@@ -25,20 +25,7 @@ declare(strict_types=1);
 
 namespace altay\network\nethernet;
 
-/**
- * Where the signals belonging to one connection are written.
- *
- * Negotiation does not care how a signal reaches the other side. On LAN it goes back out of the
- * discovery socket, but an offer that arrived over HTTP has to be answered on that same request,
- * so the reply path is decided per connection rather than by the transport.
- */
 interface SignalSink{
 
-	/**
-	 * Delivers a signal to the peer this sink belongs to.
-	 *
-	 * Implementations that can only carry a single reply - HTTP being the case that matters - are
-	 * expected to keep the answer and discard anything that follows it.
-	 */
 	public function write(Signal $signal) : void;
 }

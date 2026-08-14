@@ -28,13 +28,6 @@ namespace altay\network\nethernet\endpoint;
 use altay\network\nethernet\Signal;
 use altay\network\nethernet\SignalSink;
 
-/**
- * Collects the one signal an HTTP request can be answered with.
- *
- * Endpoint signalling is a single request and a single response, so there is no channel to trickle
- * candidates over - they travel inside the answer instead, and any candidate signalled separately
- * is dropped. The first answer or error wins; anything after it has nowhere to go.
- */
 final class EndpointSignalSink implements SignalSink{
 
 	private ?Signal $reply = null;

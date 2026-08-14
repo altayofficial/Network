@@ -37,22 +37,10 @@ use function preg_match;
 use function random_int;
 use function strlen;
 
-/**
- * Serves the HTTP signalling a dedicated server exposes, as an alternative to LAN discovery.
- *
- * Two routes make up the protocol:
- *   GET  /v1/join              - readiness probe, always 200
- *   POST /v1/join/{networkID}  - body is the client's SDP offer, the response body is the answer
- *
- * The exchange is a single request and response, so ICE cannot trickle: the answer carries every
- * candidate the server gathered, and the offer is expected to carry the client's.
- */
 final class EndpointHandler{
 
-	/** Matches the 1 MiB cap a vanilla endpoint puts on an SDP body. */
 	public const MAX_BODY_LENGTH = 1048576;
 
-	/** Matches the deadline a vanilla endpoint waits for an answer. */
 	private const NEGOTIATION_TIMEOUT = 15;
 
 	private const PATH_PATTERN = '#^/v1/join(?:/([0-9]+))?/?$#';
@@ -63,8 +51,6 @@ final class EndpointHandler{
 	){}
 
 	/**
-	 * Handles one request. Intended to be passed straight to React\Http\HttpServer.
-	 *
 	 * @return Response|PromiseInterface<Response>
 	 */
 	public function __invoke(ServerRequestInterface $request) : Response|PromiseInterface{

@@ -25,9 +25,6 @@ declare(strict_types=1);
 
 namespace altay\network\nethernet;
 
-/**
- * Hands every signal to a closure, for reply paths that are not a plain socket write.
- */
 final class CallbackSignalSink implements SignalSink{
 
 	/** @var \Closure(Signal) : void */

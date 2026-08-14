@@ -10,11 +10,6 @@ use PHPUnit\Framework\TestCase;
 
 final class AnswerRewriterTest extends TestCase{
 
-	/**
-	 * Captured verbatim from the WebRTC library answering a Bedrock-shaped offer, with the
-	 * candidate list trimmed. The three attributes this class fixes are all visible here:
-	 * max-message-size is 65536, and neither ice-options nor extmap-allow-mixed is present.
-	 */
 	private const LIBRARY_ANSWER = "v=0\r\n" .
 		"o=- 499453075625 499453075625 IN IP4 0.0.0.0\r\n" .
 		"s=-\r\n" .

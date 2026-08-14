@@ -252,9 +252,6 @@ final class NetherNetSession implements TransportSession{
 		if($this->connected){
 			$this->connected = false;
 			try{
-				//closing the peer connection tears the data channels down with it. Closing them
-				//first queues an SCTP stream reset, which then fails to send once DTLS is gone and
-				//surfaces as an unhandled rejection during teardown
 				$this->connection->close();
 			}catch(\Throwable){
 

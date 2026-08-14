@@ -15,16 +15,6 @@ use React\EventLoop\Loop;
 use React\Http\HttpServer;
 use React\Socket\SocketServer;
 
-/**
- * Negotiates a connection over HTTP endpoint signalling instead of LAN discovery, then pushes a
- * packet through it.
- *
- * This is the only test that covers the endpoint routes against a real peer connection, so it also
- * proves the answer carries enough candidates to connect without trickling.
- *
- * @group integration
- * @requires extension ffi
- */
 final class EndpointRoundTripTest extends TestCase{
 
 	private const HTTP_PORT = 17553;
@@ -44,6 +34,10 @@ final class EndpointRoundTripTest extends TestCase{
 		$this->server?->shutdown();
 	}
 
+	/**
+	 * @group integration
+	 * @requires extension ffi
+	 */
 	public function testOfferPostedOverHttpEstablishesASession() : void{
 		$logger = new DiscardingLogger();
 
