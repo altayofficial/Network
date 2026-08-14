@@ -26,6 +26,7 @@ declare(strict_types=1);
 namespace altay\network\nethernet;
 
 use altay\network\nethernet\discovery\AddressBook;
+use altay\network\nethernet\endpoint\EndpointClient;
 use altay\network\nethernet\discovery\DiscoveryCodec;
 use altay\network\nethernet\discovery\DiscoveryMessagePacket;
 use altay\network\nethernet\discovery\DiscoveryRequestPacket;
@@ -587,14 +588,58 @@ final class NetherNetTransport implements NameableTransport{
 	 * @throws TransportException
 	 */
 	public function dial(int $networkId) : NetherNetSession{
-		if($this->socket === null){
-			throw new TransportException("NetherNet transport is not running");
-		}
 		$target = $this->addressBook->lookup($networkId);
 		if($target === null){
 			throw new TransportException("Network $networkId has not been discovered");
 		}
 		[$address, $port] = $target;
+
+		return $this->startDial($networkId, $address, $port, fn() => new DatagramSignalSink(
+			fn(Signal $out, int $recipient, string $host, int $peerPort) => $this->sendSignal($out, $recipient, $host, $peerPort),
+			$networkId,
+			$address,
+			$port
+		));
+	}
+
+	/**
+	 * Opens a connection to a server that serves endpoint signalling over HTTP.
+	 *
+	 * The offer is posted rather than signalled, and the answer comes back on the same request, so
+	 * the connection has to be negotiated without trickling any candidates.
+	 *
+	 * @throws TransportException
+	 */
+	public function dialEndpoint(string $baseUrl, ?EndpointClient $client = null) : NetherNetSession{
+		$client ??= new EndpointClient($this->networkId);
+
+		return $this->startDial($this->networkId, "", 0, fn(string $connectionId) => new CallbackSignalSink(
+			function(Signal $signal) use ($client, $baseUrl, $connectionId) : void{
+				if($signal->type !== Signal::TYPE_OFFER){
+					//candidates already travel inside the offer, and there is nowhere to send an error
+					return;
+				}
+				$client->offer($baseUrl, $signal->data)->then(
+					function(string $answer) use ($connectionId) : void{
+						$this->handleAnswer(new Signal(Signal::TYPE_ANSWER, $connectionId, $answer));
+					},
+					function(\Throwable $e) use ($connectionId) : void{
+						$this->logger->error("Endpoint dial failed for connection $connectionId: " . $e->getMessage());
+						$this->dropConnection($connectionId, "endpoint rejected the offer");
+					}
+				);
+			}
+		));
+	}
+
+	/**
+	 * @param \Closure(string) : SignalSink $makeSink
+	 * @throws TransportException
+	 */
+	private function startDial(int $networkId, string $address, int $port, \Closure $makeSink) : NetherNetSession{
+		if($this->socket === null){
+			throw new TransportException("NetherNet transport is not running");
+		}
 
 		//the dialling side owns the connection ID, and the session ID is derived from it exactly as
 		//it is for an inbound connection so both directions agree on how sessions are keyed
@@ -607,12 +652,7 @@ final class NetherNetTransport implements NameableTransport{
 			throw new TransportException("Failed to create peer connection: " . $e->getMessage(), 0, $e);
 		}
 
-		$sink = new DatagramSignalSink(
-			fn(Signal $out, int $recipient, string $host, int $peerPort) => $this->sendSignal($out, $recipient, $host, $peerPort),
-			$networkId,
-			$address,
-			$port
-		);
+		$sink = $makeSink($connectionId);
 		$this->pending[$connectionId] = [
 			"connection" => $connection,
 			"networkId" => $networkId,
