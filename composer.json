@@ -18,6 +18,11 @@
     "altayofficial/webrtc": "^1.0",
     "react/http": "^1.11"
   },
+  "config": {
+    "platform": {
+      "php": "8.1.0"
+    }
+  },
   "repositories": [
     {
       "type": "vcs",
