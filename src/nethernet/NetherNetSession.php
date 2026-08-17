@@ -39,6 +39,8 @@ final class NetherNetSession implements TransportSession{
 	//one byte of the advertised maximum is spent on the segment counter
 	private const MAX_MESSAGE_SIZE = AnswerRewriter::MAX_MESSAGE_SIZE - 1;
 	private const MAX_SEGMENTS = 256;
+	//a peer that floods the channels before both of them are open is not worth buffering for
+	private const MAX_PENDING_PACKETS = 16;
 
 	private bool $connected = true;
 	private bool $openNotified = false;
@@ -47,6 +49,8 @@ final class NetherNetSession implements TransportSession{
 	private ?RTCDataChannel $unreliableChannel = null;
 	private MessageAssembler $reliableAssembler;
 	private MessageAssembler $unreliableAssembler;
+	/** @var string[] packets received before the session was announced as open */
+	private array $pendingPackets = [];
 
 	private int $bytesSent = 0;
 	private int $bytesReceived = 0;
@@ -196,7 +200,30 @@ final class NetherNetSession implements TransportSession{
 			$this->closeWithError($e->getMessage());
 			return;
 		}
-		if($packet !== null){
+		if($packet === null){
+			return;
+		}
+		//the reliable channel can carry the first packets before the unreliable one has opened, and
+		//the listener may not know about the session until both of them have
+		if(!$this->openNotified){
+			if(count($this->pendingPackets) >= self::MAX_PENDING_PACKETS){
+				$this->closeWithError("received more than " . self::MAX_PENDING_PACKETS . " packets before the session was ready");
+				return;
+			}
+			$this->pendingPackets[] = $packet;
+			return;
+		}
+		($this->packetHandler)($packet);
+	}
+
+	/**
+	 * Hands the listener everything that arrived before the session was announced as open. It must
+	 * be called right after the announcement, otherwise those packets are never delivered.
+	 */
+	public function flushPendingPackets() : void{
+		$packets = $this->pendingPackets;
+		$this->pendingPackets = [];
+		foreach($packets as $packet){
 			($this->packetHandler)($packet);
 		}
 	}

@@ -503,6 +503,7 @@ final class NetherNetTransport implements NameableTransport{
 			$session = $this->sessions[$sessionId] ?? null;
 			if($session !== null && $session->isReady() && $session->markOpenNotified()){
 				$this->listener?->onSessionOpen($this, $session);
+				$session->flushPendingPackets();
 			}
 		};
 		//both channels have to be open before the session is usable, and either of them may already
@@ -636,6 +637,7 @@ final class NetherNetTransport implements NameableTransport{
 				$session = $this->sessions[$sessionId] ?? null;
 				if($session !== null && $session->isReady() && $session->markOpenNotified()){
 					$this->listener?->onSessionOpen($this, $session);
+					$session->flushPendingPackets();
 				}
 			});
 		}
