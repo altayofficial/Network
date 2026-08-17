@@ -6,6 +6,7 @@ namespace altay\network\tests\nethernet\endpoint;
 
 use altay\network\nethernet\endpoint\EndpointClient;
 use altay\network\nethernet\endpoint\EndpointHandler;
+use altay\network\nethernet\endpoint\EndpointStatus;
 use altay\network\nethernet\NetherNetTransport;
 use altay\network\nethernet\ServerData;
 use altay\network\tests\nethernet\DiscardingLogger;
@@ -45,7 +46,7 @@ final class EndpointRoundTripTest extends TestCase{
 		$logger = new DiscardingLogger();
 
 		$serverEvents = new RecordingListener();
-		$this->server = new NetherNetTransport($logger, self::SERVER_NETWORK, new ServerData("Altay", "World"), "127.0.0.1", self::TRANSPORT_PORT);
+		$this->server = new NetherNetTransport($logger, self::SERVER_NETWORK, new ServerData("Altay", levelName: "World"), "127.0.0.1", self::TRANSPORT_PORT);
 		$this->server->start($serverEvents);
 
 		$this->socket = new SocketServer("127.0.0.1:" . self::HTTP_PORT);
@@ -53,7 +54,7 @@ final class EndpointRoundTripTest extends TestCase{
 
 		//the dialling side still needs a transport of its own to own the peer connection
 		$clientEvents = new RecordingListener();
-		$this->client = new NetherNetTransport($logger, self::CLIENT_NETWORK, new ServerData("Client", "-"), "127.0.0.1", self::CLIENT_PORT);
+		$this->client = new NetherNetTransport($logger, self::CLIENT_NETWORK, new ServerData("Client", levelName: "-"), "127.0.0.1", self::CLIENT_PORT);
 		$this->client->start($clientEvents);
 
 		$session = $this->client->dialEndpoint("http://127.0.0.1:" . self::HTTP_PORT);
@@ -84,14 +85,17 @@ final class EndpointRoundTripTest extends TestCase{
 		self::assertSame([$payload], $serverEvents->packets);
 	}
 
-	public function testReadinessProbe() : void{
+	public function testPingAnswersWithTheServerStatus() : void{
 		$logger = new DiscardingLogger();
-		$this->server = new NetherNetTransport($logger, self::SERVER_NETWORK, new ServerData(), "127.0.0.1", self::TRANSPORT_PORT);
+		$serverData = new ServerData("Altay", 2187, "1.26.50", "World", ServerData::GAME_TYPE_CREATIVE, 3, 10);
+		$this->server = new NetherNetTransport($logger, self::SERVER_NETWORK, $serverData, "127.0.0.1", self::TRANSPORT_PORT);
 
 		$handler = new EndpointHandler($this->server, $logger);
 		$response = $handler(new \React\Http\Message\ServerRequest("GET", "http://127.0.0.1/v1/join"));
 
 		self::assertSame(200, $response->getStatusCode());
+		self::assertSame("application/json", $response->getHeaderLine("Content-Type"));
+		self::assertEquals(EndpointStatus::fromServerData($serverData), EndpointStatus::fromJson((string) $response->getBody()));
 	}
 
 	public function testRejectsBadRequests() : void{

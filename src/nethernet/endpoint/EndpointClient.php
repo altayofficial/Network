@@ -49,16 +49,38 @@ final class EndpointClient{
 	}
 
 	/**
+	 * Asks the remote server for the status it advertises, the endpoint counterpart of a LAN
+	 * discovery response.
+	 *
+	 * @param string $baseUrl the remote server's endpoint, for example https://example.com:443
+	 *
+	 * @return PromiseInterface<EndpointStatus>
+	 * @throws \InvalidArgumentException when the base URL is not usable
+	 */
+	public function ping(string $baseUrl) : PromiseInterface{
+		self::checkBaseUrl($baseUrl);
+
+		$url = sprintf("%s/v1/join", rtrim($baseUrl, "/"));
+
+		return $this->browser
+			->get($url)
+			->then(static function(ResponseInterface $response) use ($url) : EndpointStatus{
+				$body = (string) $response->getBody();
+				if($response->getStatusCode() !== 200){
+					throw new EndpointException(sprintf("GET %s: %d %s: %s", $url, $response->getStatusCode(), $response->getReasonPhrase(), $body));
+				}
+				return EndpointStatus::fromJson($body);
+			});
+	}
+
+	/**
 	 * @param string $baseUrl the remote server's endpoint, for example https://example.com:443
 	 *
 	 * @return PromiseInterface<string>
 	 * @throws \InvalidArgumentException when the base URL is not usable
 	 */
 	public function offer(string $baseUrl, string $sdp) : PromiseInterface{
-		$parts = parse_url($baseUrl);
-		if($parts === false || !isset($parts["scheme"], $parts["host"]) || ($parts["scheme"] !== "http" && $parts["scheme"] !== "https")){
-			throw new \InvalidArgumentException("Endpoint address must be an HTTP or HTTPS URL: $baseUrl");
-		}
+		self::checkBaseUrl($baseUrl);
 		if(strlen($sdp) > EndpointHandler::MAX_BODY_LENGTH){
 			throw new \InvalidArgumentException("SDP offer is larger than the " . EndpointHandler::MAX_BODY_LENGTH . " byte limit");
 		}
@@ -77,5 +99,15 @@ final class EndpointClient{
 				}
 				return $body;
 			});
+	}
+
+	/**
+	 * @throws \InvalidArgumentException when the base URL is not usable
+	 */
+	private static function checkBaseUrl(string $baseUrl) : void{
+		$parts = parse_url($baseUrl);
+		if($parts === false || !isset($parts["scheme"], $parts["host"]) || ($parts["scheme"] !== "http" && $parts["scheme"] !== "https")){
+			throw new \InvalidArgumentException("Endpoint address must be an HTTP or HTTPS URL: $baseUrl");
+		}
 	}
 }

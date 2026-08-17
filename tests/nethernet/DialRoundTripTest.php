@@ -40,11 +40,11 @@ final class DialRoundTripTest extends TestCase{
 		$logger = new DiscardingLogger();
 
 		$listeningEvents = new RecordingListener();
-		$this->listening = new NetherNetTransport($logger, self::LISTEN_NETWORK, new ServerData("Altay", "World"), "127.0.0.1", self::LISTEN_PORT);
+		$this->listening = new NetherNetTransport($logger, self::LISTEN_NETWORK, new ServerData("Altay", levelName: "World"), "127.0.0.1", self::LISTEN_PORT);
 		$this->listening->start($listeningEvents);
 
 		$diallingEvents = new RecordingListener();
-		$this->dialling = new NetherNetTransport($logger, self::DIAL_NETWORK, new ServerData("Client", "-"), "127.0.0.1", self::DIAL_PORT);
+		$this->dialling = new NetherNetTransport($logger, self::DIAL_NETWORK, new ServerData("Client", levelName: "-"), "127.0.0.1", self::DIAL_PORT);
 		$this->dialling->start($diallingEvents);
 
 		//discovery is not what is under test here, so the address is seeded directly

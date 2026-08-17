@@ -61,7 +61,7 @@ final class EndpointHandler{
 		$networkId = $match[1] ?? "";
 
 		if($request->getMethod() === "GET" && $networkId === ""){
-			return self::text(200, "");
+			return self::json(200, EndpointStatus::fromServerData($this->transport->getServerData())->toJson());
 		}
 		if($request->getMethod() !== "POST"){
 			return self::text(405, "Method not allowed");
@@ -128,5 +128,9 @@ final class EndpointHandler{
 
 	private static function text(int $status, string $body) : Response{
 		return new Response($status, ["Content-Type" => "text/plain; charset=utf-8", "Connection" => "close"], $body);
+	}
+
+	private static function json(int $status, string $body) : Response{
+		return new Response($status, ["Content-Type" => "application/json", "Connection" => "close"], $body);
 	}
 }
