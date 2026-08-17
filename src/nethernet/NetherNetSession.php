@@ -244,7 +244,8 @@ final class NetherNetSession implements TransportSession{
 
 	private function sendSegment(RTCDataChannel $channel, int $remaining, string $payload) : void{
 		$segment = chr($remaining) . $payload;
-		$channel->send($segment);
+		//game packets are binary, sending them as a WebRTC string would transcode every byte above 0x7f
+		$channel->send($segment, true);
 		$this->bytesSent += strlen($segment);
 	}
 
