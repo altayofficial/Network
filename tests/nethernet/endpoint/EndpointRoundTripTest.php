@@ -98,6 +98,36 @@ final class EndpointRoundTripTest extends TestCase{
 		self::assertEquals(EndpointStatus::fromServerData($serverData), EndpointStatus::fromJson((string) $response->getBody()));
 	}
 
+	public function testTransportServesTheEndpointItWasGivenAnAddressFor() : void{
+		$logger = new DiscardingLogger();
+		$this->server = new NetherNetTransport(
+			$logger,
+			self::SERVER_NETWORK,
+			new ServerData("Altay", levelName: "World"),
+			"127.0.0.1",
+			self::TRANSPORT_PORT,
+			endpointAddress: "127.0.0.1:" . self::HTTP_PORT
+		);
+		$this->server->start(new RecordingListener());
+
+		$status = null;
+		(new EndpointClient(self::CLIENT_NETWORK))
+			->ping("http://127.0.0.1:" . self::HTTP_PORT)
+			->then(static function(EndpointStatus $received) use (&$status) : void{
+				$status = $received;
+			});
+
+		$deadline = microtime(true) + self::TIMEOUT;
+		while($status === null && microtime(true) < $deadline){
+			$this->server->tick();
+			usleep(20000);
+		}
+
+		self::assertNotNull($status, "the endpoint never answered the ping");
+		self::assertSame("Altay", $status->serverName);
+		self::assertSame("World", $status->levelName);
+	}
+
 	public function testRejectsBadRequests() : void{
 		$logger = new DiscardingLogger();
 		$this->server = new NetherNetTransport($logger, self::SERVER_NETWORK, new ServerData(), "127.0.0.1", self::TRANSPORT_PORT);

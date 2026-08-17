@@ -27,6 +27,7 @@ namespace altay\network\nethernet;
 
 use altay\network\nethernet\discovery\AddressBook;
 use altay\network\nethernet\endpoint\EndpointClient;
+use altay\network\nethernet\endpoint\EndpointHandler;
 use altay\network\nethernet\discovery\DiscoveryCodec;
 use altay\network\nethernet\discovery\DiscoveryMessagePacket;
 use altay\network\nethernet\discovery\DiscoveryRequestPacket;
@@ -43,6 +44,8 @@ use altay\network\transport\TransportException;
 use altay\network\transport\TransportListener;
 use altay\network\utils\Uint64;
 use React\EventLoop\Loop;
+use React\Http\HttpServer;
+use React\Socket\SocketServer;
 use function React\Promise\set_rejection_handler;
 use Webrtc\DataChannel\RTCDataChannel;
 use Webrtc\DataChannel\RTCDataChannelParameters;
@@ -59,6 +62,7 @@ final class NetherNetTransport implements NameableTransport{
 	private const MAINTENANCE_INTERVAL = 1;
 
 	private ?\Socket $socket = null;
+	private ?SocketServer $endpointSocket = null;
 	private ?TransportListener $listener = null;
 	private ?ServerIdentity $identity = null;
 
@@ -77,7 +81,8 @@ final class NetherNetTransport implements NameableTransport{
 		private string $bindAddress = "0.0.0.0",
 		private int $port = self::DISCOVERY_PORT,
 		private bool $requireIdentity = false,
-		private ?Credentials $credentials = null
+		private ?Credentials $credentials = null,
+		private ?string $endpointAddress = null
 	){
 		$this->addressBook = new AddressBook();
 	}
@@ -151,6 +156,28 @@ final class NetherNetTransport implements NameableTransport{
 		});
 
 		$this->logger->info("NetherNet transport listening for discovery on $this->bindAddress:$this->port (network ID $this->networkId)");
+
+		if($this->endpointAddress !== null){
+			$this->startEndpoint($this->endpointAddress);
+		}
+	}
+
+	/**
+	 * Serves the HTTP signalling endpoint, which lets peers that cannot see the discovery
+	 * broadcast negotiate a connection by posting their offer instead.
+	 *
+	 * @throws TransportException
+	 */
+	private function startEndpoint(string $address) : void{
+		try{
+			$socket = new SocketServer($address);
+		}catch(\RuntimeException | \InvalidArgumentException $e){
+			throw new TransportException("Failed to bind endpoint signalling socket to $address: " . $e->getMessage(), 0, $e);
+		}
+		(new HttpServer(new EndpointHandler($this, $this->logger)))->listen($socket);
+		$this->endpointSocket = $socket;
+
+		$this->logger->info("NetherNet endpoint signalling listening on " . $socket->getAddress());
 	}
 
 	public function tick() : void{
@@ -229,6 +256,10 @@ final class NetherNetTransport implements NameableTransport{
 	}
 
 	public function shutdown() : void{
+		if($this->endpointSocket !== null){
+			$this->endpointSocket->close();
+			$this->endpointSocket = null;
+		}
 		foreach($this->sessions as $session){
 			$session->disconnect();
 		}
@@ -268,7 +299,8 @@ final class NetherNetTransport implements NameableTransport{
 	private function handleDatagram(string $buffer, string $address, int $port) : void{
 		$result = DiscoveryCodec::unmarshal($buffer);
 		if($result === null){
-			$this->logger->debug("Ignoring invalid discovery datagram from $address:$port (" . strlen($buffer) . " bytes)");
+			$hexPrefix = bin2hex(substr($buffer, 0, 16));
+			$this->logger->debug("Ignoring invalid discovery datagram from $address:$port (" . strlen($buffer) . " bytes, hex prefix $hexPrefix)");
 			return;
 		}
 		[$packet, $senderId] = $result;
