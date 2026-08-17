@@ -114,6 +114,8 @@ final class NetherNetTransport implements NameableTransport{
 			return;
 		}
 		$this->serverData->serverName = $parts[1];
+		$this->serverData->protocol = (int) $parts[2];
+		$this->serverData->gameVersion = $parts[3];
 		$this->serverData->levelName = $parts[7];
 		$this->serverData->playerCount = (int) $parts[4];
 		$this->serverData->maxPlayerCount = (int) $parts[5];

@@ -26,7 +26,6 @@ declare(strict_types=1);
 namespace altay\network\nethernet;
 
 use altay\network\nethernet\types\ConnectionType;
-use altay\network\nethernet\types\TransportLayer;
 use pocketmine\utils\BinaryDataException;
 use function bin2hex;
 use function random_bytes;
@@ -43,6 +42,8 @@ final class ServerData{
 
 	public function __construct(
 		public string $serverName = "Altay",
+		public int $protocol = 0,
+		public string $gameVersion = "",
 		public string $levelName = "Altay Server",
 		public int $gameType = self::GAME_TYPE_SURVIVAL,
 		public int $playerCount = 0,
@@ -52,7 +53,6 @@ final class ServerData{
 		public bool $acceptsOnlineAuth = false,
 		public bool $acceptsSelfSignedAuth = true,
 		public string $nonce = "",
-		public TransportLayer $transportLayer = TransportLayer::NETHERNET,
 		public ConnectionType $connectionType = ConnectionType::LAN_SIGNALING
 	){
 		if($this->nonce === ""){
@@ -72,16 +72,17 @@ final class ServerData{
 		$out = new PacketSerializer();
 		$out->putByte(self::VERSION);
 		$out->putString($this->serverName);
+		$out->putVarInt($this->protocol);
+		$out->putString($this->gameVersion);
 		$out->putString($this->levelName);
+		$out->putVarInt($this->playerCount);
+		$out->putVarInt($this->maxPlayerCount);
 		$out->putVarInt($this->gameType);
-		$out->putLInt($this->playerCount);
-		$out->putLInt($this->maxPlayerCount);
 		$out->putBool($this->editorWorld);
 		$out->putBool($this->hardcore);
 		$out->putBool($this->acceptsOnlineAuth);
 		$out->putBool($this->acceptsSelfSignedAuth);
 		$out->putString($this->nonce);
-		$out->putVarInt($this->transportLayer->value);
 		$out->putVarInt($this->connectionType->value);
 		return $out->getBuffer();
 	}
@@ -97,16 +98,17 @@ final class ServerData{
 		}
 
 		$serverName = $in->getString();
+		$protocol = $in->getVarInt();
+		$gameVersion = $in->getString();
 		$levelName = $in->getString();
+		$playerCount = $in->getVarInt();
+		$maxPlayerCount = $in->getVarInt();
 		$gameType = $in->getVarInt();
-		$playerCount = $in->getLInt();
-		$maxPlayerCount = $in->getLInt();
 		$editorWorld = $in->getBool();
 		$hardcore = $in->getBool();
 		$acceptsOnlineAuth = $in->getBool();
 		$acceptsSelfSignedAuth = $in->getBool();
 		$nonce = $in->getString();
-		$transportLayerId = $in->getVarInt();
 		$connectionTypeId = $in->getVarInt();
 		if(!$in->feof()){
 			throw new BinaryDataException("Unread bytes left in server data");
@@ -114,6 +116,8 @@ final class ServerData{
 
 		$data = new self(
 			$serverName,
+			$protocol,
+			$gameVersion,
 			$levelName,
 			$gameType,
 			$playerCount,
@@ -123,7 +127,6 @@ final class ServerData{
 			$acceptsOnlineAuth,
 			$acceptsSelfSignedAuth,
 			$nonce,
-			TransportLayer::tryFrom($transportLayerId) ?? throw new BinaryDataException("Unknown transport layer $transportLayerId"),
 			ConnectionType::tryFrom($connectionTypeId) ?? throw new BinaryDataException("Unknown connection type $connectionTypeId")
 		);
 		//an empty nonce would otherwise be replaced by a freshly generated one in the constructor
