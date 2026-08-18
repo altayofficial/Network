@@ -421,7 +421,7 @@ final class NetherNetTransport implements NameableTransport{
 		$offer = $signal->data;
 		$connection->setRemoteDescription(new RTCSessionDescription($offer, "offer"))
 			->then(function() use ($connection, $offer, $connectionId) : void{
-				$this->addSessionLevelCandidates($connection, $offer, $connectionId);
+				$this->addOfferedCandidates($connection, $offer, $connectionId);
 			})
 			->then(fn() => $connection->createAnswer())
 			->then(fn(RTCSessionDescription $answer) => $connection->setLocalDescription($answer))
@@ -442,8 +442,13 @@ final class NetherNetTransport implements NameableTransport{
 			});
 	}
 
-	private function addSessionLevelCandidates(RTCPeerConnection $connection, string $sdp, string $connectionId) : void{
-		foreach(IceCandidate::parseAll(SessionDescription::sessionSection($sdp)) as $candidate){
+	/**
+	 * Adds every candidate the offer already carries, wherever it sits in the SDP. A peer that
+	 * signals over the LAN socket trickles them separately, but one that negotiated over the HTTP
+	 * endpoint has no way back after its offer - the candidates in it are all there will ever be.
+	 */
+	private function addOfferedCandidates(RTCPeerConnection $connection, string $sdp, string $connectionId) : void{
+		foreach(IceCandidate::parseAll($sdp) as $candidate){
 			$this->addCandidate($connection, $candidate, $connectionId);
 		}
 	}
@@ -725,7 +730,7 @@ final class NetherNetTransport implements NameableTransport{
 		unset($this->pending[$signal->connectionId]);
 		$connection->setRemoteDescription(new RTCSessionDescription($answer, "answer"))
 			->then(function() use ($connection, $answer, $signal) : void{
-				$this->addSessionLevelCandidates($connection, $answer, $signal->connectionId);
+				$this->addOfferedCandidates($connection, $answer, $signal->connectionId);
 			})
 			->catch(function(\Throwable $e) use ($signal) : void{
 				$this->logger->error("Failed to apply answer for connection $signal->connectionId: " . $e->getMessage());
