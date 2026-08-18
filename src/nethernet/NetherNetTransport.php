@@ -218,6 +218,8 @@ final class NetherNetTransport implements NameableTransport{
 	private function expireStalePending(int $now) : void{
 		foreach($this->pending as $connectionId => $entry){
 			if($now - $entry["createdAt"] >= self::PENDING_NEGOTIATION_TIMEOUT){
+				//connection IDs are decimal uint64 strings, which PHP turns back into ints as array keys
+				$connectionId = (string) $connectionId;
 				$this->logger->debug("Dropping stale pending negotiation $connectionId from " . $entry["address"] . ":" . $entry["port"]);
 				$this->dropConnection($connectionId, "negotiation timed out", SignalErrorCode::NEGOTIATION_TIMEOUT_WAITING_FOR_ACCEPT);
 			}
