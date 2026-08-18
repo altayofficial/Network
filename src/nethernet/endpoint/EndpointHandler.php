@@ -27,6 +27,7 @@ namespace altay\network\nethernet\endpoint;
 
 use altay\network\nethernet\NetherNetTransport;
 use altay\network\nethernet\Signal;
+use altay\network\utils\Uint64;
 use Psr\Http\Message\ServerRequestInterface;
 use React\EventLoop\Loop;
 use React\Http\Message\Response;
@@ -72,6 +73,11 @@ final class EndpointHandler{
 		if(!ctype_digit($networkId)){
 			return self::text(400, "Network ID must be uint64");
 		}
+		try{
+			$senderNetworkId = Uint64::toSignedInt($networkId);
+		}catch(\InvalidArgumentException){
+			return self::text(400, "Network ID must be uint64");
+		}
 
 		$offer = (string) $request->getBody();
 		if($offer === ""){
@@ -81,13 +87,13 @@ final class EndpointHandler{
 			return self::text(413, "SDP offer is too large");
 		}
 
-		return $this->negotiate($networkId, $offer);
+		return $this->negotiate($networkId, $senderNetworkId, $offer);
 	}
 
 	/**
 	 * @return PromiseInterface<Response>
 	 */
-	private function negotiate(string $networkId, string $offer) : PromiseInterface{
+	private function negotiate(string $networkId, int $senderNetworkId, string $offer) : PromiseInterface{
 		//nothing in the request names the connection, so this side assigns the ID
 		$connectionId = (string) random_int(0, PHP_INT_MAX);
 
@@ -106,7 +112,7 @@ final class EndpointHandler{
 		//the peer is reached over HTTP rather than a socket address, so there is none to record
 		$this->transport->acceptOffer(
 			new Signal(Signal::TYPE_OFFER, $connectionId, $offer),
-			(int) $networkId,
+			$senderNetworkId,
 			"",
 			0,
 			$sink

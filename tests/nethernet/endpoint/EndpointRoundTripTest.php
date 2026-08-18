@@ -170,5 +170,6 @@ final class EndpointRoundTripTest extends TestCase{
 		self::assertSame(400, $handler(new \React\Http\Message\ServerRequest("POST", "http://127.0.0.1/v1/join"))->getStatusCode());
 		self::assertSame(405, $handler(new \React\Http\Message\ServerRequest("PUT", "http://127.0.0.1/v1/join/1"))->getStatusCode());
 		self::assertSame(400, $handler(new \React\Http\Message\ServerRequest("POST", "http://127.0.0.1/v1/join/1"))->getStatusCode());
+		self::assertSame(400, $handler(new \React\Http\Message\ServerRequest("POST", "http://127.0.0.1/v1/join/18446744073709551616"))->getStatusCode());
 	}
 }
