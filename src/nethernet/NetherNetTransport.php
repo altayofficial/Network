@@ -28,6 +28,7 @@ namespace altay\network\nethernet;
 use altay\network\nethernet\discovery\AddressBook;
 use altay\network\nethernet\endpoint\EndpointClient;
 use altay\network\nethernet\endpoint\EndpointHandler;
+use altay\network\nethernet\endpoint\PlaintextSignallingServer;
 use altay\network\nethernet\discovery\DiscoveryCodec;
 use altay\network\nethernet\discovery\DiscoveryMessagePacket;
 use altay\network\nethernet\discovery\DiscoveryRequestPacket;
@@ -171,7 +172,7 @@ final class NetherNetTransport implements NameableTransport{
 		}catch(\RuntimeException | \InvalidArgumentException $e){
 			throw new TransportException("Failed to bind endpoint signalling socket to $address: " . $e->getMessage(), 0, $e);
 		}
-		(new HttpServer(new EndpointHandler($this, $this->logger)))->listen($socket);
+		(new HttpServer(new EndpointHandler($this, $this->logger)))->listen(new PlaintextSignallingServer($socket));
 		$this->endpointSocket = $socket;
 
 		$this->logger->info("NetherNet endpoint signalling listening on " . $socket->getAddress());

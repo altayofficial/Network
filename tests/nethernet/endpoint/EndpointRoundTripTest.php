@@ -128,6 +128,39 @@ final class EndpointRoundTripTest extends TestCase{
 		self::assertSame("World", $status->levelName);
 	}
 
+	public function testClosesAConnectionThatOpensWithTls() : void{
+		$logger = new DiscardingLogger();
+		$this->server = new NetherNetTransport(
+			$logger,
+			self::SERVER_NETWORK,
+			new ServerData("Altay", levelName: "World"),
+			"127.0.0.1",
+			self::TRANSPORT_PORT,
+			endpointAddress: "127.0.0.1:" . self::HTTP_PORT
+		);
+		$this->server->start(new RecordingListener());
+
+		$client = stream_socket_client("tcp://127.0.0.1:" . self::HTTP_PORT, $errno, $errstr, self::TIMEOUT);
+		self::assertNotFalse($client, "could not reach the endpoint: $errstr");
+		stream_set_blocking($client, false);
+		//the first bytes of a TLS client hello: a handshake record for TLS 1.0 and up
+		fwrite($client, "\x16\x03\x01\x00\x2f\x01");
+
+		$closed = false;
+		$deadline = microtime(true) + self::TIMEOUT;
+		while(microtime(true) < $deadline){
+			$this->server->tick();
+			if(fread($client, 1) === "" && feof($client)){
+				$closed = true;
+				break;
+			}
+			usleep(20000);
+		}
+		fclose($client);
+
+		self::assertTrue($closed, "the endpoint left the TLS attempt open");
+	}
+
 	public function testRejectsBadRequests() : void{
 		$logger = new DiscardingLogger();
 		$this->server = new NetherNetTransport($logger, self::SERVER_NETWORK, new ServerData(), "127.0.0.1", self::TRANSPORT_PORT);
