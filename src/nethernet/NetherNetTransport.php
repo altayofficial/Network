@@ -156,7 +156,7 @@ final class NetherNetTransport implements NameableTransport{
 			$this->logger->debug("Ignoring unhandled WebRTC promise rejection: " . $reason->getMessage());
 		});
 
-		$this->logger->info("NetherNet transport listening for discovery on $this->bindAddress:$this->port (network ID $this->networkId)");
+		$this->logger->info("NetherNet transport listening for discovery on $this->bindAddress:$this->port");
 
 		if($this->endpointAddress !== null){
 			$this->startEndpoint($this->endpointAddress);
@@ -174,8 +174,6 @@ final class NetherNetTransport implements NameableTransport{
 		}
 		(new HttpServer(new EndpointHandler($this, $this->logger)))->listen(new PlaintextSignallingServer($socket));
 		$this->endpointSocket = $socket;
-
-		$this->logger->info("NetherNet endpoint signalling listening on " . $socket->getAddress());
 	}
 
 	public function tick() : void{
