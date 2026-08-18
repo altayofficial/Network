@@ -163,9 +163,6 @@ final class NetherNetTransport implements NameableTransport{
 	}
 
 	/**
-	 * Serves the HTTP signalling endpoint, which lets peers that cannot see the discovery
-	 * broadcast negotiate a connection by posting their offer instead.
-	 *
 	 * @throws TransportException
 	 */
 	private function startEndpoint(string $address) : void{
@@ -218,7 +215,6 @@ final class NetherNetTransport implements NameableTransport{
 	private function expireStalePending(int $now) : void{
 		foreach($this->pending as $connectionId => $entry){
 			if($now - $entry["createdAt"] >= self::PENDING_NEGOTIATION_TIMEOUT){
-				//connection IDs are decimal uint64 strings, which PHP turns back into ints as array keys
 				$connectionId = (string) $connectionId;
 				$this->logger->debug("Dropping stale pending negotiation $connectionId from " . $entry["address"] . ":" . $entry["port"]);
 				$this->dropConnection($connectionId, "negotiation timed out", SignalErrorCode::NEGOTIATION_TIMEOUT_WAITING_FOR_ACCEPT);
@@ -442,11 +438,6 @@ final class NetherNetTransport implements NameableTransport{
 			});
 	}
 
-	/**
-	 * Adds every candidate the offer already carries, wherever it sits in the SDP. A peer that
-	 * signals over the LAN socket trickles them separately, but one that negotiated over the HTTP
-	 * endpoint has no way back after its offer - the candidates in it are all there will ever be.
-	 */
 	private function addOfferedCandidates(RTCPeerConnection $connection, string $sdp, string $connectionId) : void{
 		foreach(IceCandidate::parseAll($sdp) as $candidate){
 			$this->addCandidate($connection, $candidate, $connectionId);

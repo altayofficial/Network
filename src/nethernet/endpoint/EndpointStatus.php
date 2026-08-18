@@ -32,10 +32,6 @@ use function is_string;
 use function json_decode;
 use function json_encode;
 
-/**
- * The status a server advertises over its signalling endpoint, the HTTP counterpart of the
- * ServerData sent in a LAN discovery response.
- */
 final class EndpointStatus{
 
 	public function __construct(

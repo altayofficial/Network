@@ -49,9 +49,6 @@ final class EndpointClient{
 	}
 
 	/**
-	 * Asks the remote server for the status it advertises, the endpoint counterpart of a LAN
-	 * discovery response.
-	 *
 	 * @param string $baseUrl the remote server's endpoint, for example https://example.com:443
 	 *
 	 * @return PromiseInterface<EndpointStatus>
