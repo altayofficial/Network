@@ -23,12 +23,6 @@ jobs:
           php-version: ${{ matrix.php }}
           extensions: sockets, openssl, gmp, ffi
 
-      # The WebRTC stack dlopens libsrtp2 through FFI while bringing up DTLS. Without it the
-      # extension loads but no peer connection can be created, so the integration tests skip
-      # themselves and the negotiation path goes uncovered.
-      - name: Install libsrtp2
-        run: sudo apt-get update && sudo apt-get install -y libsrtp2-dev
-
       - name: Validate composer.json
         run: composer validate --strict --no-check-publish
 
