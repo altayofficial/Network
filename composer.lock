@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "037501b07240696f0b4e023e3d674263",
+    "content-hash": "63eb5b469d6d0963a2af7a82bd595cf0",
     "packages": [
         {
             "name": "pocketmine/binaryutils",
@@ -165,16 +165,16 @@
     "packages-dev": [
         {
             "name": "altayofficial/webrtc",
-            "version": "v2.0.0",
+            "version": "1.1.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/altayofficial/webrtc.git",
-                "reference": "b50445203e0e2894d5affd540c16fe45f111baad"
+                "reference": "65c16452e49d53819caae2532f1922e4a1e73848"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/altayofficial/webrtc/zipball/b50445203e0e2894d5affd540c16fe45f111baad",
-                "reference": "b50445203e0e2894d5affd540c16fe45f111baad",
+                "url": "https://api.github.com/repos/altayofficial/webrtc/zipball/65c16452e49d53819caae2532f1922e4a1e73848",
+                "reference": "65c16452e49d53819caae2532f1922e4a1e73848",
                 "shasum": ""
             },
             "require": {
@@ -235,12 +235,12 @@
             "license": [
                 "BSD-3-Clause"
             ],
-            "description": "PHP-WebRTC downgraded to run on PHP 8.1 and later. Generated - see tools/build.php.",
+            "description": "A WebRTC library designed special for Altay family",
             "support": {
-                "source": "https://github.com/altayofficial/webrtc/tree/v2.0.0",
+                "source": "https://github.com/altayofficial/webrtc/tree/1.1.0",
                 "issues": "https://github.com/altayofficial/webrtc/issues"
             },
-            "time": "2026-08-19T08:47:18+00:00"
+            "time": "2026-08-19T09:08:22+00:00"
         },
         {
             "name": "brick/math",
