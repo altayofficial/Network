@@ -5,14 +5,12 @@ declare(strict_types=1);
 namespace altay\network\tests\nethernet;
 
 use Webrtc\Webrtc\RTCPeerConnection;
-use function extension_loaded;
 
 trait RequiresPeerConnection{
 
 	protected function requirePeerConnection() : void{
-		if(!extension_loaded("ffi")){
-			self::markTestSkipped("the WebRTC stack needs ext-ffi");
-		}
+		//the DTLS stack is pure PHP now, so there is no extension left to check for - if a peer
+		//connection cannot be built it is a real failure of something below
 		try{
 			(new RTCPeerConnection())->close();
 		}catch(\Throwable $e){

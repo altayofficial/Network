@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "63eb5b469d6d0963a2af7a82bd595cf0",
+    "content-hash": "bbf007f4be08e35be668c818798063c1",
     "packages": [
         {
             "name": "pocketmine/binaryutils",
@@ -164,22 +164,74 @@
     ],
     "packages-dev": [
         {
-            "name": "altayofficial/webrtc",
-            "version": "1.1.0",
+            "name": "altayofficial/dtls",
+            "version": "1.0.0",
             "source": {
                 "type": "git",
-                "url": "https://github.com/altayofficial/webrtc.git",
-                "reference": "65c16452e49d53819caae2532f1922e4a1e73848"
+                "url": "https://github.com/altayofficial/dtls.git",
+                "reference": "d95b7788abc8b84e2df7a069e183eb63bf16a48a"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/altayofficial/webrtc/zipball/65c16452e49d53819caae2532f1922e4a1e73848",
-                "reference": "65c16452e49d53819caae2532f1922e4a1e73848",
+                "url": "https://api.github.com/repos/altayofficial/dtls/zipball/d95b7788abc8b84e2df7a069e183eb63bf16a48a",
+                "reference": "d95b7788abc8b84e2df7a069e183eb63bf16a48a",
                 "shasum": ""
             },
             "require": {
+                "ext-hash": "*",
+                "ext-openssl": "*",
+                "php": "^8.1"
+            },
+            "require-dev": {
+                "phpstan/phpstan": "^2.0",
+                "phpunit/phpunit": "^10.5"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "altay\\dtls\\": "src/"
+                }
+            },
+            "autoload-dev": {
+                "psr-4": {
+                    "altay\\dtls\\tests\\": "tests/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "phpunit"
+                ],
+                "analyse": [
+                    "phpstan analyse"
+                ]
+            },
+            "license": [
+                "GPL-3.0-or-later"
+            ],
+            "description": "Pure PHP DTLS 1.2 - no FFI, no native libraries",
+            "support": {
+                "source": "https://github.com/altayofficial/dtls/tree/1.0.0",
+                "issues": "https://github.com/altayofficial/dtls/issues"
+            },
+            "time": "2026-08-19T09:57:18+00:00"
+        },
+        {
+            "name": "altayofficial/webrtc",
+            "version": "1.2.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/altayofficial/webrtc.git",
+                "reference": "7ec335e376e853d38b9c5efd69997d50b01559de"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/altayofficial/webrtc/zipball/7ec335e376e853d38b9c5efd69997d50b01559de",
+                "reference": "7ec335e376e853d38b9c5efd69997d50b01559de",
+                "shasum": ""
+            },
+            "require": {
+                "altayofficial/dtls": "^1.0",
                 "evenement/evenement": "^3.0",
-                "ext-ffi": "*",
                 "ext-gmp": "*",
                 "php": "^8.1",
                 "psr/log": "^3.0",
@@ -203,7 +255,6 @@
                 "quasarstream/rtp-parameter": "v1.0.0",
                 "quasarstream/sctp": "v1.0.0",
                 "quasarstream/sdp": "v1.0.0",
-                "quasarstream/ssl": "v1.0.0",
                 "quasarstream/stats": "v1.0.0",
                 "quasarstream/stun": "v1.0.1",
                 "quasarstream/turn": "v1.0.0",
@@ -222,7 +273,6 @@
                     "Webrtc\\RTPParameter\\": "src/rtp-parameter/src/",
                     "Webrtc\\SCTP\\": "src/sctp/src/",
                     "Webrtc\\SDP\\": "src/sdp/src/",
-                    "Webrtc\\SSL\\": "src/ssl/src/",
                     "Webrtc\\STUN\\": "src/stun/src/",
                     "Webrtc\\Stats\\": "src/stats/src/",
                     "Webrtc\\TURN\\": "src/turn/src/",
@@ -237,10 +287,10 @@
             ],
             "description": "A WebRTC library designed special for Altay family",
             "support": {
-                "source": "https://github.com/altayofficial/webrtc/tree/1.1.0",
+                "source": "https://github.com/altayofficial/webrtc/tree/1.2.0",
                 "issues": "https://github.com/altayofficial/webrtc/issues"
             },
-            "time": "2026-08-19T09:08:22+00:00"
+            "time": "2026-08-19T10:21:44+00:00"
         },
         {
             "name": "brick/math",

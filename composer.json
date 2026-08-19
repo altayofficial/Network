@@ -15,7 +15,7 @@
   "require-dev": {
     "phpunit/phpunit": "^10.5",
     "phpstan/phpstan": "^2.0",
-    "altayofficial/webrtc": "^1.1.0",
+    "altayofficial/webrtc": "^1.2.0",
     "react/http": "^1.11"
   },
   "config": {
@@ -27,6 +27,10 @@
     {
       "type": "vcs",
       "url": "https://github.com/altayofficial/webrtc"
+    },
+    {
+      "type": "vcs",
+      "url": "https://github.com/altayofficial/dtls"
     }
   ],
   "autoload": {

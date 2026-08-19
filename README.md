@@ -27,4 +27,4 @@ To add another network system, implement `Transport` and register it on the same
 
 ## Requirements
 - PHP 8.1+ with `ext-sockets` and `ext-openssl`
-- The NetherNet transport additionally needs the requirements of [php-webrtc](https://github.com/PHP-WebRTC/webrtc): PHP 8.1+, `ext-ffi`, `ext-gmp` and OpenSSL (if Linux)
+- The NetherNet transport additionally needs `ext-gmp`. Its DTLS layer is [altayofficial/dtls](https://github.com/altayofficial/dtls), which is pure PHP - there is no `ext-ffi` requirement and no native library is loaded at runtime
