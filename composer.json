@@ -1,6 +1,6 @@
 {
   "name": "altayofficial/network",
-  "description": "Central network library for Altay written in PHP",
+  "description": "Central network library for Altay family written in PHP",
   "type": "library",
   "license": "GPL-3.0-or-later",
   "require": {
