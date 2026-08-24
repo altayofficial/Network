@@ -62,13 +62,14 @@ final class NetherNetTransport implements NameableTransport{
 	private const PENDING_NEGOTIATION_TIMEOUT = 15;
 	private const MAINTENANCE_INTERVAL = 1;
 	private const SIGNAL_SOCKET_BUFFER = 4 * 1024 * 1024;
+	private const SIGNAL_RETRANSMIT_INTERVAL = 2;
 
 	private ?\Socket $socket = null;
 	private ?SocketServer $endpointSocket = null;
 	private ?TransportListener $listener = null;
 	private ?ServerIdentity $identity = null;
 
-	/** @var array<string, array{connection: RTCPeerConnection, networkId: int, address: string, port: int, publicKey: ?string, createdAt: int, outgoing: bool, sink: SignalSink}> */
+	/** @var array<string, array{connection: RTCPeerConnection, networkId: int, address: string, port: int, publicKey: ?string, createdAt: int, outgoing: bool, sink: SignalSink, offer: ?string, answer: ?string, lastSignalAt: float}> */
 	private array $pending = [];
 	/** @var NetherNetSession[] */
 	private array $sessions = [];
@@ -210,10 +211,41 @@ final class NetherNetTransport implements NameableTransport{
 		$now = time();
 		if($now - $this->lastMaintenance >= self::MAINTENANCE_INTERVAL){
 			$this->lastMaintenance = $now;
+			$this->retransmitPendingSignals();
 			$this->expireStalePending($now);
 			$this->expireUnreadySessions($now);
 			$this->addressBook->expire($now);
 			$this->reportBandwidth();
+		}
+	}
+
+	/**
+	 * NetherNet signalling is a bare datagram exchange, so a dropped offer or answer used to strand
+	 * the negotiation until it timed out. Repeating the last thing sent, until the negotiation moves
+	 * on or expires, is enough to recover: a repeated offer is answered from cache, and a repeated
+	 * answer is applied to a connection that is still waiting for one.
+	 */
+	private function retransmitPendingSignals() : void{
+		$now = microtime(true);
+		foreach($this->pending as $connectionId => $entry){
+			if($now - $entry["lastSignalAt"] < self::SIGNAL_RETRANSMIT_INTERVAL){
+				continue;
+			}
+			$connectionId = (string) $connectionId;
+			if($entry["outgoing"]){
+				if($entry["offer"] === null){
+					continue;
+				}
+				$this->logger->debug("Repeating offer for connection $connectionId, no answer yet");
+				$entry["sink"]->write(new Signal(Signal::TYPE_OFFER, $connectionId, $entry["offer"]));
+			}else{
+				if($entry["answer"] === null){
+					continue;
+				}
+				$this->logger->debug("Repeating answer for connection $connectionId, the peer has not connected yet");
+				$entry["sink"]->write(new Signal(Signal::TYPE_ANSWER, $connectionId, $entry["answer"]));
+			}
+			$this->pending[$connectionId]["lastSignalAt"] = $now;
 		}
 	}
 
@@ -368,7 +400,17 @@ final class NetherNetTransport implements NameableTransport{
 		}catch(\InvalidArgumentException){
 			return;
 		}
-		if(isset($this->pending[$connectionId]) || isset($this->sessions[$sessionId])){
+		$existing = $this->pending[$connectionId] ?? null;
+		if($existing !== null){
+			//the peer only repeats an offer when it did not get the answer, so send that answer again
+			//rather than dropping the retry on the floor
+			if($existing["answer"] !== null){
+				$this->logger->debug("Repeating answer for connection $connectionId, the peer re-sent its offer");
+				$existing["sink"]->write(new Signal(Signal::TYPE_ANSWER, $connectionId, $existing["answer"]));
+			}
+			return;
+		}
+		if(isset($this->sessions[$sessionId])){
 			return;
 		}
 
@@ -402,7 +444,10 @@ final class NetherNetTransport implements NameableTransport{
 			"publicKey" => $assertion?->getPublicKeyBase64(),
 			"createdAt" => time(),
 			"outgoing" => false,
-			"sink" => $sink
+			"sink" => $sink,
+			"offer" => null,
+			"answer" => null,
+			"lastSignalAt" => microtime(true)
 		];
 
 		$connection->on("datachannel", function(RTCDataChannel $channel) use ($connectionId, $sessionId, $address, $port, $connection) : void{
@@ -434,7 +479,13 @@ final class NetherNetTransport implements NameableTransport{
 				}
 				$sdp = AnswerRewriter::conform($local->getSdp());
 				$this->logger->debug("Sending answer for connection $connectionId");
-				$sink->write(new Signal(Signal::TYPE_ANSWER, $connectionId, $this->withIdentityAttribute($sdp)));
+				$answer = $this->withIdentityAttribute($sdp);
+				//kept so a repeated offer can be answered without renegotiating from scratch
+				if(isset($this->pending[$connectionId])){
+					$this->pending[$connectionId]["answer"] = $answer;
+					$this->pending[$connectionId]["lastSignalAt"] = microtime(true);
+				}
+				$sink->write(new Signal(Signal::TYPE_ANSWER, $connectionId, $answer));
 				$this->trickleCandidates($sdp, $connectionId, $sink);
 			})
 			->catch(function(\Throwable $e) use ($connectionId) : void{
@@ -651,7 +702,10 @@ final class NetherNetTransport implements NameableTransport{
 			"publicKey" => null,
 			"createdAt" => time(),
 			"outgoing" => true,
-			"sink" => $sink
+			"sink" => $sink,
+			"offer" => null,
+			"answer" => null,
+			"lastSignalAt" => microtime(true)
 		];
 		$connection->on("connectionstatechange", function() use ($connection, $connectionId) : void{
 			$state = $connection->getConnectionState();
@@ -687,7 +741,13 @@ final class NetherNetTransport implements NameableTransport{
 				}
 				$sdp = AnswerRewriter::conform($local->getSdp());
 				$this->logger->debug("Sending offer for connection $connectionId to network $networkId");
-				$sink->write(new Signal(Signal::TYPE_OFFER, $connectionId, $this->withIdentityAttribute($sdp)));
+				$offer = $this->withIdentityAttribute($sdp);
+				//kept so the offer can be repeated if no answer comes back
+				if(isset($this->pending[$connectionId])){
+					$this->pending[$connectionId]["offer"] = $offer;
+					$this->pending[$connectionId]["lastSignalAt"] = microtime(true);
+				}
+				$sink->write(new Signal(Signal::TYPE_OFFER, $connectionId, $offer));
 				$this->trickleCandidates($sdp, $connectionId, $sink);
 			})
 			->catch(function(\Throwable $e) use ($connectionId) : void{
