@@ -740,7 +740,10 @@ final class NetherNetTransport implements NameableTransport{
 				$this->logger->debug("Discarding expired NetherNet credentials");
 				$this->credentials = null;
 			}
-			return new RTCPeerConnection();
+			//without an explicit list the library falls back to a public STUN server, which means an
+			//internet round trip per connection just to learn a reflexive candidate that a LAN peer
+			//can never use. Signalling here is local, so host candidates are all that is wanted.
+			return new RTCPeerConnection(["iceServers" => []]);
 		}
 		return new RTCPeerConnection($this->credentials->toPeerConnectionConfiguration());
 	}
