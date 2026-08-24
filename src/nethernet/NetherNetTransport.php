@@ -61,6 +61,7 @@ final class NetherNetTransport implements NameableTransport{
 
 	private const PENDING_NEGOTIATION_TIMEOUT = 15;
 	private const MAINTENANCE_INTERVAL = 1;
+	private const SIGNAL_SOCKET_BUFFER = 4 * 1024 * 1024;
 
 	private ?\Socket $socket = null;
 	private ?SocketServer $endpointSocket = null;
@@ -142,6 +143,11 @@ final class NetherNetTransport implements NameableTransport{
 		}
 		@socket_set_option($socket, SOL_SOCKET, SO_REUSEADDR, 1);
 		@socket_set_option($socket, SOL_SOCKET, SO_BROADCAST, 1);
+		//an SDP offer is several kilobytes, so the default receive buffer only holds a couple of
+		//dozen of them. A join burst overflows it, and since signalling has no retransmission of its
+		//own every dropped offer stranded a connection until it timed out
+		@socket_set_option($socket, SOL_SOCKET, SO_RCVBUF, self::SIGNAL_SOCKET_BUFFER);
+		@socket_set_option($socket, SOL_SOCKET, SO_SNDBUF, self::SIGNAL_SOCKET_BUFFER);
 		if(!@socket_bind($socket, $this->bindAddress, $this->port)){
 			$error = socket_strerror(socket_last_error($socket));
 			socket_close($socket);
@@ -760,7 +766,11 @@ final class NetherNetTransport implements NameableTransport{
 
 	private function sendDatagram(string $datagram, string $address, int $port) : void{
 		if($this->socket !== null){
-			@socket_sendto($this->socket, $datagram, strlen($datagram), 0, $address, $port);
+			$sent = @socket_sendto($this->socket, $datagram, strlen($datagram), 0, $address, $port);
+			if($sent !== strlen($datagram)){
+				//a short or failed write loses a whole signal, and the peer has no way to notice
+				$this->logger->debug("Failed to send " . strlen($datagram) . " byte signalling datagram to $address:$port: " . socket_strerror(socket_last_error($this->socket)));
+			}
 		}
 	}
 
