@@ -68,6 +68,7 @@ final class NetherNetTransport implements NameableTransport{
 	private ?SocketServer $endpointSocket = null;
 	private ?TransportListener $listener = null;
 	private ?ServerIdentity $identity = null;
+	private bool $running = false;
 
 	/** @var array<string, array{connection: RTCPeerConnection, networkId: int, address: string, port: int, publicKey: ?string, createdAt: int, outgoing: bool, sink: SignalSink, offer: ?string, answer: ?string, lastSignalAt: float}> */
 	private array $pending = [];
@@ -85,7 +86,8 @@ final class NetherNetTransport implements NameableTransport{
 		private int $port = self::DISCOVERY_PORT,
 		private bool $requireIdentity = false,
 		private ?Credentials $credentials = null,
-		private ?string $endpointAddress = null
+		private ?string $endpointAddress = null,
+		private ?string $identityKeyPath = null
 	){
 		$this->addressBook = new AddressBook();
 	}
@@ -135,9 +137,37 @@ final class NetherNetTransport implements NameableTransport{
 	}
 
 	public function start(TransportListener $listener) : void{
-		if($this->socket !== null){
+		if($this->running){
 			throw new TransportException("NetherNet transport is already running");
 		}
+		$this->socket = $this->createDiscoverySocket();
+		if($this->socket === null && $this->endpointAddress === null){
+			throw new TransportException("NetherNet transport has no way to receive signalling: discovery is unavailable and no endpoint is configured");
+		}
+		$this->listener = $listener;
+		$this->identity = $this->makeIdentity();
+		$this->running = true;
+
+		set_rejection_handler(function(\Throwable $reason) : void{
+			$this->logger->debug("Ignoring unhandled WebRTC promise rejection: " . $reason->getMessage());
+		});
+
+		if($this->socket !== null){
+			$this->logger->info("NetherNet transport listening for discovery on $this->bindAddress:$this->port");
+		}
+
+		if($this->endpointAddress !== null){
+			$this->startEndpoint($this->endpointAddress);
+		}
+	}
+
+	/**
+	 * Returns null if the discovery port is unusable. That only costs the server its LAN
+	 * advertisement, so the transport carries on with whatever signalling is left.
+	 *
+	 * @throws TransportException
+	 */
+	private function createDiscoverySocket() : ?\Socket{
 		$socket = @socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
 		if($socket === false){
 			throw new TransportException("Failed to create discovery socket: " . socket_strerror(socket_last_error()));
@@ -152,22 +182,24 @@ final class NetherNetTransport implements NameableTransport{
 		if(!@socket_bind($socket, $this->bindAddress, $this->port)){
 			$error = socket_strerror(socket_last_error($socket));
 			socket_close($socket);
-			throw new TransportException("Failed to bind discovery socket to $this->bindAddress:$this->port: $error");
+			$this->logger->warning("Failed to bind NetherNet discovery socket to $this->bindAddress:$this->port: $error");
+			$this->logger->warning("The server won't show up on the Friends tab. Free port $this->port and restart to fix it.");
+			return null;
 		}
 		socket_set_nonblock($socket);
-		$this->socket = $socket;
-		$this->listener = $listener;
-		$this->identity = ServerIdentity::generate();
+		return $socket;
+	}
 
-		set_rejection_handler(function(\Throwable $reason) : void{
-			$this->logger->debug("Ignoring unhandled WebRTC promise rejection: " . $reason->getMessage());
-		});
-
-		$this->logger->info("NetherNet transport listening for discovery on $this->bindAddress:$this->port");
-
-		if($this->endpointAddress !== null){
-			$this->startEndpoint($this->endpointAddress);
+	private function makeIdentity() : ServerIdentity{
+		if($this->identityKeyPath !== null){
+			try{
+				return ServerIdentity::loadOrCreate($this->identityKeyPath);
+			}catch(\RuntimeException $e){
+				$this->logger->warning("Failed to use the NetherNet identity key at $this->identityKeyPath: " . $e->getMessage());
+				$this->logger->warning("Falling back to a temporary identity, which changes on every restart.");
+			}
 		}
+		return ServerIdentity::generate();
 	}
 
 	/**
@@ -184,10 +216,10 @@ final class NetherNetTransport implements NameableTransport{
 	}
 
 	public function tick() : void{
-		if($this->socket === null){
+		if(!$this->running){
 			return;
 		}
-		while(true){
+		while($this->socket !== null){
 			$buffer = "";
 			$address = "";
 			$port = 0;
@@ -287,7 +319,7 @@ final class NetherNetTransport implements NameableTransport{
 	}
 
 	public function isRunning() : bool{
-		return $this->socket !== null;
+		return $this->running;
 	}
 
 	public function shutdown() : void{
@@ -325,6 +357,7 @@ final class NetherNetTransport implements NameableTransport{
 		}
 		set_rejection_handler(null);
 		$this->listener = null;
+		$this->running = false;
 	}
 
 	public function getSession(int $connectionId) : ?NetherNetSession{
@@ -678,7 +711,7 @@ final class NetherNetTransport implements NameableTransport{
 	 * @throws TransportException
 	 */
 	private function startDial(int $networkId, string $address, int $port, \Closure $makeSink) : NetherNetSession{
-		if($this->socket === null){
+		if(!$this->running){
 			throw new TransportException("NetherNet transport is not running");
 		}
 
