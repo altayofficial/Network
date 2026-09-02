@@ -46,10 +46,51 @@ final class ServerIdentity{
 		return new self($key, self::extractPublicKeyBase64($key), $domain);
 	}
 
+	/**
+	 * Reuses the key stored at the given path, creating it if it isn't there yet, so that the server
+	 * keeps the same identity across restarts.
+	 *
+	 * @throws \RuntimeException if the key can't be read, parsed or written
+	 */
+	public static function loadOrCreate(string $path, string $domain = "self") : self{
+		if(!is_file($path)){
+			$identity = self::generate($domain);
+			$identity->save($path);
+			return $identity;
+		}
+
+		$pem = file_get_contents($path);
+		if($pem === false){
+			throw new \RuntimeException("Failed to read identity key from $path");
+		}
+		$key = openssl_pkey_get_private($pem);
+		if($key === false){
+			throw new \RuntimeException("Failed to parse identity key: " . openssl_error_string());
+		}
+		return new self($key, self::extractPublicKeyBase64($key), $domain);
+	}
+
+	/**
+	 * @throws \RuntimeException
+	 */
+	private function save(string $path) : void{
+		if(!openssl_pkey_export($this->privateKey, $pem)){
+			throw new \RuntimeException("Failed to export identity key: " . openssl_error_string());
+		}
+		if(file_put_contents($path, $pem) === false){
+			throw new \RuntimeException("Failed to write identity key to $path");
+		}
+		//the key is what proves the server's identity to a client, so nothing else may read it
+		@chmod($path, 0600);
+	}
+
 	private static function extractPublicKeyBase64(\OpenSSLAsymmetricKey $key) : string{
 		$details = openssl_pkey_get_details($key);
 		if($details === false){
 			throw new \RuntimeException("Failed to read identity key details");
+		}
+		if($details["type"] !== OPENSSL_KEYTYPE_EC){
+			throw new \RuntimeException("Identity key must be an EC key, identity tokens are signed with ES384");
 		}
 		$pem = $details["key"];
 		return str_replace(["-----BEGIN PUBLIC KEY-----", "-----END PUBLIC KEY-----", "\n", "\r"], "", $pem);
