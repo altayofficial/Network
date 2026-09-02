@@ -38,9 +38,14 @@ final class MessageAssembler{
 	 * @param bool $segmented Whether the channel may split a packet at all. An unreliable channel
 	 *                        may not: a dropped segment would leave the rest unusable, so the
 	 *                        counter is required to be zero.
+	 * @param int $maxSegmentSize Largest single message accepted. The size advertised in the SDP is
+	 *                            not enforced by anything below this layer.
+	 * @param int $maxPacketSize Largest packet that may be assembled out of those messages.
 	 */
 	public function __construct(
-		private bool $segmented
+		private bool $segmented,
+		private int $maxSegmentSize,
+		private int $maxPacketSize
 	){}
 
 	/**
@@ -54,9 +59,16 @@ final class MessageAssembler{
 			throw new MessageFormatException("Received a message without a payload");
 		}
 
+		if(strlen($data) - 1 > $this->maxSegmentSize){
+			throw new MessageFormatException("Received a " . (strlen($data) - 1) . " byte message, the limit is $this->maxSegmentSize");
+		}
+
 		$remaining = ord($data[0]);
 		if(!$this->segmented && $remaining !== 0){
 			throw new MessageFormatException("Received a segmented message on an unsegmented channel");
+		}
+		if(strlen($this->buffer) + strlen($data) - 1 > $this->maxPacketSize){
+			throw new MessageFormatException("Assembled packet would exceed the $this->maxPacketSize byte limit");
 		}
 		if($this->pendingSegments > 0 && $this->pendingSegments - 1 !== $remaining){
 			throw new MessageFormatException("Expected segment counter " . ($this->pendingSegments - 1) . ", got $remaining");

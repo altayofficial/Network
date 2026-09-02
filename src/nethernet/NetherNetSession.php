@@ -40,6 +40,12 @@ final class NetherNetSession implements TransportSession{
 	private const MAX_MESSAGE_SIZE = AnswerRewriter::MAX_MESSAGE_SIZE - 1;
 	private const MAX_SEGMENTS = 256;
 	private const MAX_PENDING_PACKETS = 16;
+	/**
+	 * The segment counter alone would allow a peer to stream 255 full-sized messages into the
+	 * assembly buffer before the packet is complete, so the assembled size is capped as well. Game
+	 * batches stay far below this, it only exists to bound what a peer can make the server hold.
+	 */
+	private const MAX_PACKET_SIZE = 4 * 1024 * 1024;
 
 	private bool $connected = true;
 	private bool $openNotified = false;
@@ -75,8 +81,8 @@ final class NetherNetSession implements TransportSession{
 		$this->closeHandler = $closeHandler;
 		$this->ackHandler = $ackHandler;
 		$this->createdAt = time();
-		$this->reliableAssembler = new MessageAssembler(true);
-		$this->unreliableAssembler = new MessageAssembler(false);
+		$this->reliableAssembler = new MessageAssembler(true, AnswerRewriter::MAX_MESSAGE_SIZE, self::MAX_PACKET_SIZE);
+		$this->unreliableAssembler = new MessageAssembler(false, AnswerRewriter::MAX_MESSAGE_SIZE, self::MAX_PACKET_SIZE);
 	}
 
 	public function getId() : int{
