@@ -40,12 +40,15 @@ use altay\network\nethernet\sdp\AnswerRewriter;
 use altay\network\nethernet\sdp\IceCandidate;
 use altay\network\nethernet\sdp\SessionDescription;
 use altay\network\nethernet\types\SignalErrorCode;
+use altay\network\transport\AddressBlockingTransport;
 use altay\network\transport\NameableTransport;
 use altay\network\transport\TransportException;
 use altay\network\transport\TransportListener;
 use altay\network\utils\Uint64;
 use React\EventLoop\Loop;
 use React\Http\HttpServer;
+use React\Http\Middleware\LimitConcurrentRequestsMiddleware;
+use React\Http\Middleware\RequestBodyBufferMiddleware;
 use React\Socket\SocketServer;
 use function React\Promise\set_rejection_handler;
 use Webrtc\DataChannel\RTCDataChannel;
@@ -55,7 +58,7 @@ use Webrtc\SDP\RTCSessionDescription;
 use Webrtc\Webrtc\Enum\ConnectionState;
 use Webrtc\Webrtc\RTCPeerConnection;
 
-final class NetherNetTransport implements NameableTransport{
+final class NetherNetTransport implements NameableTransport, AddressBlockingTransport{
 
 	public const DISCOVERY_PORT = 7551;
 
@@ -64,11 +67,29 @@ final class NetherNetTransport implements NameableTransport{
 	private const SIGNAL_SOCKET_BUFFER = 4 * 1024 * 1024;
 	private const SIGNAL_RETRANSMIT_INTERVAL = 2;
 
+	/**
+	 * Negotiating a connection costs a DTLS handshake and an ICE agent, and nothing about an offer is
+	 * authenticated, so both the total and the per-peer rate have to be capped or an anonymous peer
+	 * can keep the transport thread busy enough to starve the players already on the server.
+	 */
+	private const MAX_PENDING_NEGOTIATIONS = 64;
+	private const MAX_OFFERS_PER_ADDRESS = 8;
+	private const OFFER_RATE_WINDOW = 10;
+	private const MAX_REMOTE_CANDIDATES = 32;
+
+	private const ENDPOINT_MAX_CONCURRENT_REQUESTS = 64;
+
 	private ?\Socket $socket = null;
 	private ?SocketServer $endpointSocket = null;
 	private ?TransportListener $listener = null;
 	private ?ServerIdentity $identity = null;
 	private bool $running = false;
+	private ?DtlsCertificateFiles $certificateFiles = null;
+	private ?string $discoveryResponse = null;
+	/** @var array<string, int> address => unix time the block expires */
+	private array $blockedAddresses = [];
+	/** @var array<string, array{count: int, since: int}> address => offers seen in the current window */
+	private array $offerRates = [];
 
 	/** @var array<string, array{connection: RTCPeerConnection, networkId: int, address: string, port: int, publicKey: ?string, createdAt: int, outgoing: bool, sink: SignalSink, offer: ?string, answer: ?string, lastSignalAt: float}> */
 	private array $pending = [];
@@ -118,6 +139,7 @@ final class NetherNetTransport implements NameableTransport{
 	}
 
 	public function setName(string $name) : void{
+		$this->discoveryResponse = null;
 		$parts = explode(";", $name);
 		if(count($parts) < 9 || $parts[0] !== "MCPE"){
 			$this->serverData->serverName = $name;
@@ -146,6 +168,12 @@ final class NetherNetTransport implements NameableTransport{
 		}
 		$this->listener = $listener;
 		$this->identity = $this->makeIdentity();
+		try{
+			$this->certificateFiles = DtlsCertificateFiles::generate();
+		}catch(\RuntimeException $e){
+			//a per-connection key pair still works, it is just much more expensive to hand out
+			$this->logger->warning("Failed to prepare a shared DTLS certificate: " . $e->getMessage());
+		}
 		$this->running = true;
 
 		set_rejection_handler(function(\Throwable $reason) : void{
@@ -211,7 +239,17 @@ final class NetherNetTransport implements NameableTransport{
 		}catch(\RuntimeException | \InvalidArgumentException $e){
 			throw new TransportException("Failed to bind endpoint signalling socket to $address: " . $e->getMessage(), 0, $e);
 		}
-		(new HttpServer(new EndpointHandler($this, $this->logger)))->listen(new PlaintextSignallingServer($socket));
+		//the body limit the handler enforces has to be applied while buffering as well, or React
+		//would happily hold post_max_size worth of offer per request before the handler ever runs
+		$server = new HttpServer(
+			new LimitConcurrentRequestsMiddleware(self::ENDPOINT_MAX_CONCURRENT_REQUESTS),
+			new RequestBodyBufferMiddleware(EndpointHandler::MAX_BODY_LENGTH),
+			new EndpointHandler($this, $this->logger)
+		);
+		$server->on("error", function(\Throwable $e) : void{
+			$this->logger->debug("Endpoint signalling error: " . $e->getMessage());
+		});
+		$server->listen(new PlaintextSignallingServer($socket));
 		$this->endpointSocket = $socket;
 	}
 
@@ -246,6 +284,7 @@ final class NetherNetTransport implements NameableTransport{
 			$this->retransmitPendingSignals();
 			$this->expireStalePending($now);
 			$this->expireUnreadySessions($now);
+			$this->expireRateLimits($now);
 			$this->addressBook->expire($now);
 			$this->reportBandwidth();
 		}
@@ -287,6 +326,24 @@ final class NetherNetTransport implements NameableTransport{
 				$connectionId = (string) $connectionId;
 				$this->logger->debug("Dropping stale pending negotiation $connectionId from " . $entry["address"] . ":" . $entry["port"]);
 				$this->dropConnection($connectionId, "negotiation timed out", SignalErrorCode::NEGOTIATION_TIMEOUT_WAITING_FOR_ACCEPT);
+			}
+		}
+	}
+
+	/**
+	 * Source addresses are trivially spoofed on the discovery socket, so the bookkeeping they create
+	 * has to be thrown away as soon as it stops meaning anything - otherwise it is a memory leak with
+	 * a remote trigger.
+	 */
+	private function expireRateLimits(int $now) : void{
+		foreach($this->offerRates as $address => $entry){
+			if($now - $entry["since"] >= self::OFFER_RATE_WINDOW){
+				unset($this->offerRates[$address]);
+			}
+		}
+		foreach($this->blockedAddresses as $address => $until){
+			if($until <= $now){
+				unset($this->blockedAddresses[$address]);
 			}
 		}
 	}
@@ -355,6 +412,8 @@ final class NetherNetTransport implements NameableTransport{
 			socket_close($this->socket);
 			$this->socket = null;
 		}
+		$this->certificateFiles?->delete();
+		$this->certificateFiles = null;
 		set_rejection_handler(null);
 		$this->listener = null;
 		$this->running = false;
@@ -364,7 +423,71 @@ final class NetherNetTransport implements NameableTransport{
 		return $this->sessions[$connectionId] ?? null;
 	}
 
+	public function blockAddress(string $address, int $timeout = 300) : void{
+		if($address === ""){
+			return;
+		}
+		$until = $timeout < 0 ? PHP_INT_MAX : time() + $timeout;
+		if(($this->blockedAddresses[$address] ?? 0) >= $until){
+			return;
+		}
+		$this->blockedAddresses[$address] = $until;
+		$this->logger->notice("Blocked $address" . ($timeout < 0 ? " forever" : " for $timeout seconds"));
+
+		foreach($this->pending as $connectionId => $entry){
+			if($entry["address"] === $address){
+				$this->dropConnection((string) $connectionId, "address blocked");
+			}
+		}
+		foreach($this->sessions as $sessionId => $session){
+			if($session->getAddress() === $address){
+				$this->closeSession($sessionId, "address blocked");
+			}
+		}
+	}
+
+	public function unblockAddress(string $address) : void{
+		unset($this->blockedAddresses[$address]);
+		$this->logger->debug("Unblocked $address");
+	}
+
+	public function isBlocked(string $address) : bool{
+		$until = $this->blockedAddresses[$address] ?? null;
+		if($until === null){
+			return false;
+		}
+		if($until > time()){
+			return true;
+		}
+		unset($this->blockedAddresses[$address]);
+		return false;
+	}
+
+	/**
+	 * Offers are unauthenticated and each one costs a peer connection, so a peer that asks for more
+	 * than its share within the window is turned away until the window rolls over.
+	 */
+	private function withinOfferRate(string $address) : bool{
+		if($address === ""){
+			return true;
+		}
+		$now = time();
+		$entry = $this->offerRates[$address] ?? null;
+		if($entry === null || $now - $entry["since"] >= self::OFFER_RATE_WINDOW){
+			$this->offerRates[$address] = ["count" => 1, "since" => $now];
+			return true;
+		}
+		if($entry["count"] >= self::MAX_OFFERS_PER_ADDRESS){
+			return false;
+		}
+		$this->offerRates[$address]["count"]++;
+		return true;
+	}
+
 	private function handleDatagram(string $buffer, string $address, int $port) : void{
+		if($this->isBlocked($address)){
+			return;
+		}
 		$result = DiscoveryCodec::unmarshal($buffer);
 		if($result === null){
 			$hexPrefix = bin2hex(substr($buffer, 0, 16));
@@ -378,8 +501,10 @@ final class NetherNetTransport implements NameableTransport{
 		$this->addressBook->remember($senderId, $address, $port, time());
 
 		if($packet instanceof DiscoveryRequestPacket){
-			$response = DiscoveryCodec::marshal(new DiscoveryResponsePacket($this->serverData->encode()), $this->networkId);
-			$this->sendDatagram($response, $address, $port);
+			//every client on the network asks for this every couple of seconds, and the answer only
+			//changes when the server data does, so it is encoded once and kept
+			$this->discoveryResponse ??= DiscoveryCodec::marshal(new DiscoveryResponsePacket($this->serverData->encode()), $this->networkId);
+			$this->sendDatagram($this->discoveryResponse, $address, $port);
 		}elseif($packet instanceof DiscoveryMessagePacket){
 			if($packet->recipientId !== $this->networkId){
 				$this->logger->debug("Ignoring discovery message from $address:$port intended for network " . $packet->recipientId);
@@ -400,6 +525,14 @@ final class NetherNetTransport implements NameableTransport{
 	}
 
 	private function handleSignal(Signal $signal, int $senderNetworkId, string $address, int $port) : void{
+		//an offer opens a connection, everything else acts on one that already exists - and since
+		//signalling datagrams carry no authentication at all, anyone who has seen a connection ID on
+		//the wire could otherwise tear down or redirect somebody else's connection
+		if($signal->type !== Signal::TYPE_OFFER && !$this->signalCameFromPeer($signal->connectionId, $address, $port)){
+			$this->logger->debug("Ignoring " . $signal->type . " for connection $signal->connectionId from unrelated address $address:$port");
+			return;
+		}
+
 		switch($signal->type){
 			case Signal::TYPE_OFFER:
 				$this->handleOffer($signal, $senderNetworkId, $address, $port);
@@ -415,6 +548,25 @@ final class NetherNetTransport implements NameableTransport{
 				$this->dropConnection($signal->connectionId, "remote error: " . ($code !== null ? $code->name : $signal->data));
 				break;
 		}
+	}
+
+	/**
+	 * Whether a signalling datagram came from the peer the connection belongs to. Connections
+	 * negotiated over the HTTP endpoint have no signalling address, so nothing on the discovery
+	 * socket may speak for them.
+	 */
+	private function signalCameFromPeer(string $connectionId, string $address, int $port) : bool{
+		$entry = $this->pending[$connectionId] ?? null;
+		if($entry !== null){
+			return $entry["address"] === $address && $entry["port"] === $port;
+		}
+		try{
+			$sessionId = Uint64::toSignedInt($connectionId);
+		}catch(\InvalidArgumentException){
+			return false;
+		}
+		$session = $this->sessions[$sessionId] ?? null;
+		return $session !== null && $session->getAddress() === $address && $session->getPort() === $port;
 	}
 
 	private function handleOffer(Signal $signal, int $senderNetworkId, string $address, int $port) : void{
@@ -444,6 +596,19 @@ final class NetherNetTransport implements NameableTransport{
 			return;
 		}
 		if(isset($this->sessions[$sessionId])){
+			return;
+		}
+		if($this->isBlocked($address)){
+			return;
+		}
+		if(count($this->pending) >= self::MAX_PENDING_NEGOTIATIONS){
+			$this->logger->debug("Rejecting connection $connectionId from $address:$port: " . count($this->pending) . " negotiations already in flight");
+			$sink->write(self::errorSignal($connectionId, SignalErrorCode::FAILED_TO_CREATE_PEER_CONNECTION));
+			return;
+		}
+		if(!$this->withinOfferRate($address)){
+			$this->logger->debug("Rejecting connection $connectionId from $address:$port: too many offers in the last " . self::OFFER_RATE_WINDOW . " seconds");
+			$sink->write(self::errorSignal($connectionId, SignalErrorCode::FAILED_TO_CREATE_PEER_CONNECTION));
 			return;
 		}
 
@@ -528,8 +693,15 @@ final class NetherNetTransport implements NameableTransport{
 	}
 
 	private function addOfferedCandidates(RTCPeerConnection $connection, string $sdp, string $connectionId) : void{
+		$added = 0;
 		foreach(IceCandidate::parseAll($sdp) as $candidate){
-			$this->addCandidate($connection, $candidate, $connectionId);
+			if($added >= self::MAX_REMOTE_CANDIDATES){
+				$this->logger->debug("Ignoring the remaining candidates of connection $connectionId, it offered more than " . self::MAX_REMOTE_CANDIDATES);
+				break;
+			}
+			if($this->addCandidate($connection, $candidate, $connectionId)){
+				$added++;
+			}
 		}
 	}
 
@@ -559,7 +731,13 @@ final class NetherNetTransport implements NameableTransport{
 		$this->addCandidate($connection, $candidate, $signal->connectionId);
 	}
 
-	private function addCandidate(RTCPeerConnection $connection, IceCandidate $candidate, string $connectionId) : void{
+	private function addCandidate(RTCPeerConnection $connection, IceCandidate $candidate, string $connectionId) : bool{
+		//a candidate names a host this server is about to send STUN checks to, and the peer that
+		//offered it is not authenticated, so it may not point at the loopback or link-local ranges
+		if(!$candidate->hasConnectableAddress()){
+			$this->logger->debug("Ignoring candidate with unusable address " . $candidate->address . " for connection $connectionId");
+			return false;
+		}
 		try{
 			$parsed = RTCIceCandidate::parseSDP($candidate->toSdpValue());
 			//a candidate signalled on its own carries no media section, but the library insists on
@@ -567,8 +745,10 @@ final class NetherNetTransport implements NameableTransport{
 			$parsed->setSdpMid(0);
 			$parsed->setSdpMLineIndex(0);
 			$connection->addIceCandidate($parsed);
+			return true;
 		}catch(\Throwable $e){
 			$this->logger->debug("Ignoring invalid ICE candidate for connection $connectionId: " . $e->getMessage());
+			return false;
 		}
 	}
 
@@ -836,9 +1016,21 @@ final class NetherNetTransport implements NameableTransport{
 			//without an explicit list the library falls back to a public STUN server, which means an
 			//internet round trip per connection just to learn a reflexive candidate that a LAN peer
 			//can never use. Signalling here is local, so host candidates are all that is wanted.
-			return new RTCPeerConnection(["iceServers" => []]);
+			return new RTCPeerConnection($this->withSharedCertificate(["iceServers" => []]));
 		}
-		return new RTCPeerConnection($this->credentials->toPeerConnectionConfiguration());
+		return new RTCPeerConnection($this->withSharedCertificate($this->credentials->toPeerConnectionConfiguration()));
+	}
+
+	/**
+	 * @param mixed[] $configuration
+	 * @return mixed[]
+	 */
+	private function withSharedCertificate(array $configuration) : array{
+		if($this->certificateFiles !== null){
+			$configuration["certificatePath"] = $this->certificateFiles->certificatePath;
+			$configuration["privateKeyPath"] = $this->certificateFiles->privateKeyPath;
+		}
+		return $configuration;
 	}
 
 	public function signalNetwork(Signal $signal, int $recipientNetworkId) : bool{
