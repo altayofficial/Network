@@ -97,4 +97,40 @@ final class IceCandidateTest extends TestCase{
 		self::assertSame("10.0.0.1", $candidates[0]->address);
 		self::assertSame("10.0.0.2", $candidates[1]->address);
 	}
+
+	/**
+	 * @dataProvider addressProvider
+	 */
+	public function testOnlyConnectableAddressesAreAccepted(string $address, bool $expected) : void{
+		$candidate = IceCandidate::parse("a=candidate:1 1 udp 100 $address 5000 typ host");
+
+		self::assertNotNull($candidate);
+		self::assertSame($expected, $candidate->hasConnectableAddress());
+	}
+
+	/**
+	 * @return array<string, array{string, bool}>
+	 */
+	public static function addressProvider() : array{
+		return [
+			"lan" => ["192.168.1.5", true],
+			"public" => ["8.8.8.8", true],
+			"public v6" => ["2001:db8::1", true],
+			"mdns" => ["8bf1d2a0.local", true],
+			"loopback" => ["127.0.0.1", false],
+			"loopback v6" => ["::1", false],
+			"link local" => ["169.254.1.2", false],
+			"multicast" => ["224.0.0.1", false],
+			"multicast v6" => ["ff02::1", false],
+			"unspecified" => ["0.0.0.0", false],
+			"hostname" => ["example.com", false]
+		];
+	}
+
+	public function testPortOutOfRangeIsNotConnectable() : void{
+		$candidate = IceCandidate::parse("a=candidate:1 1 udp 100 10.0.0.1 0 typ host");
+
+		self::assertNotNull($candidate);
+		self::assertFalse($candidate->hasConnectableAddress());
+	}
 }
