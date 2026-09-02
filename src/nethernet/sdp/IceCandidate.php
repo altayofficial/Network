@@ -28,13 +28,20 @@ namespace altay\network\nethernet\sdp;
 use function array_shift;
 use function count;
 use function explode;
+use function filter_var;
 use function in_array;
+use function inet_pton;
 use function ltrim;
+use function ord;
 use function preg_split;
+use function str_ends_with;
 use function str_starts_with;
+use function strlen;
 use function strtolower;
 use function substr;
 use function trim;
+use const FILTER_FLAG_NO_RES_RANGE;
+use const FILTER_VALIDATE_IP;
 
 final class IceCandidate{
 
@@ -99,6 +106,38 @@ final class IceCandidate{
 			}
 		}
 		return $candidates;
+	}
+
+	/**
+	 * Whether the candidate names a host worth sending connectivity checks to.
+	 *
+	 * Private ranges have to stay allowed, they are what a LAN connection runs over, but loopback,
+	 * link-local, multicast and the reserved ranges never belong to a remote peer - and since the
+	 * peer that offered the candidate is not authenticated, accepting those would turn the server
+	 * into a probe aimed at whatever listens on them. Hostnames are left to the ICE agent, which
+	 * resolves mDNS candidates itself.
+	 */
+	public function hasConnectableAddress() : bool{
+		if($this->port < 1 || $this->port > 65535){
+			return false;
+		}
+		if(filter_var($this->address, FILTER_VALIDATE_IP) === false){
+			return str_ends_with(strtolower($this->address), ".local");
+		}
+		if(filter_var($this->address, FILTER_VALIDATE_IP, FILTER_FLAG_NO_RES_RANGE) === false){
+			return false;
+		}
+		return !self::isMulticast($this->address);
+	}
+
+	private static function isMulticast(string $address) : bool{
+		$packed = inet_pton($address);
+		if($packed === false){
+			return false;
+		}
+		$first = ord($packed[0]);
+		//224.0.0.0/4 for IPv4, ff00::/8 for IPv6
+		return strlen($packed) === 4 ? ($first & 0xf0) === 0xe0 : $first === 0xff;
 	}
 
 	public function format(int $networkId, string $ufrag) : string{
