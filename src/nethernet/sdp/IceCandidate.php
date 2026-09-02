@@ -28,20 +28,18 @@ namespace altay\network\nethernet\sdp;
 use function array_shift;
 use function count;
 use function explode;
-use function filter_var;
 use function in_array;
 use function inet_pton;
 use function ltrim;
 use function ord;
 use function preg_split;
 use function str_ends_with;
+use function str_repeat;
 use function str_starts_with;
 use function strlen;
 use function strtolower;
 use function substr;
 use function trim;
-use const FILTER_FLAG_NO_RES_RANGE;
-use const FILTER_VALIDATE_IP;
 
 final class IceCandidate{
 
@@ -121,23 +119,39 @@ final class IceCandidate{
 		if($this->port < 1 || $this->port > 65535){
 			return false;
 		}
-		if(filter_var($this->address, FILTER_VALIDATE_IP) === false){
+		$packed = @inet_pton($this->address);
+		if($packed === false){
 			return str_ends_with(strtolower($this->address), ".local");
 		}
-		if(filter_var($this->address, FILTER_VALIDATE_IP, FILTER_FLAG_NO_RES_RANGE) === false){
-			return false;
-		}
-		return !self::isMulticast($this->address);
+		//the ranges PHP itself calls reserved move between versions, so they are spelled out here
+		return strlen($packed) === 4 ? self::isConnectableV4($packed) : self::isConnectableV6($packed);
 	}
 
-	private static function isMulticast(string $address) : bool{
-		$packed = inet_pton($address);
-		if($packed === false){
+	private static function isConnectableV4(string $packed) : bool{
+		$first = ord($packed[0]);
+		if($first === 0 || $first === 127){ //0.0.0.0/8, 127.0.0.0/8
 			return false;
 		}
+		if($first === 169 && ord($packed[1]) === 254){ //169.254.0.0/16
+			return false;
+		}
+		//224.0.0.0/4 multicast, 240.0.0.0/4 reserved, and the broadcast address with it
+		return $first < 224;
+	}
+
+	private static function isConnectableV6(string $packed) : bool{
+		if($packed === str_repeat("\x00", 16) || $packed === str_repeat("\x00", 15) . "\x01"){ //::, ::1
+			return false;
+		}
+		//an IPv4-mapped address is an IPv4 address wearing a hat, so judge it as one
+		if(str_starts_with($packed, str_repeat("\x00", 10) . "\xff\xff")){
+			return self::isConnectableV4(substr($packed, 12));
+		}
 		$first = ord($packed[0]);
-		//224.0.0.0/4 for IPv4, ff00::/8 for IPv6
-		return strlen($packed) === 4 ? ($first & 0xf0) === 0xe0 : $first === 0xff;
+		if($first === 0xff){ //ff00::/8 multicast
+			return false;
+		}
+		return !($first === 0xfe && (ord($packed[1]) & 0xc0) === 0x80); //fe80::/10 link-local
 	}
 
 	public function format(int $networkId, string $ufrag) : string{

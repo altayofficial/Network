@@ -122,7 +122,12 @@ final class IceCandidateTest extends TestCase{
 			"link local" => ["169.254.1.2", false],
 			"multicast" => ["224.0.0.1", false],
 			"multicast v6" => ["ff02::1", false],
+			"link local v6" => ["fe80::1", false],
 			"unspecified" => ["0.0.0.0", false],
+			"unspecified v6" => ["::", false],
+			"broadcast" => ["255.255.255.255", false],
+			"v4 mapped lan" => ["::ffff:192.168.1.5", true],
+			"v4 mapped loopback" => ["::ffff:127.0.0.1", false],
 			"hostname" => ["example.com", false]
 		];
 	}
