@@ -34,6 +34,8 @@ use React\Http\Message\Response;
 use React\Promise\Deferred;
 use React\Promise\PromiseInterface;
 use function ctype_digit;
+use function is_int;
+use function is_string;
 use function preg_match;
 use function random_int;
 use function strlen;
@@ -87,13 +89,32 @@ final class EndpointHandler{
 			return self::text(413, "SDP offer is too large");
 		}
 
-		return $this->negotiate($networkId, $senderNetworkId, $offer);
+		[$address, $port] = self::peer($request);
+		if($address !== "" && $this->transport->isBlocked($address)){
+			return self::text(403, "Forbidden");
+		}
+
+		return $this->negotiate($networkId, $senderNetworkId, $offer, $address, $port);
+	}
+
+	/**
+	 * @return array{string, int} the peer's address and port, empty when the server could not name it
+	 */
+	private static function peer(ServerRequestInterface $request) : array{
+		$params = $request->getServerParams();
+		$address = $params["REMOTE_ADDR"] ?? null;
+		$port = $params["REMOTE_PORT"] ?? null;
+
+		return [
+			is_string($address) ? $address : "",
+			is_string($port) || is_int($port) ? (int) $port : 0
+		];
 	}
 
 	/**
 	 * @return PromiseInterface<Response>
 	 */
-	private function negotiate(string $networkId, int $senderNetworkId, string $offer) : PromiseInterface{
+	private function negotiate(string $networkId, int $senderNetworkId, string $offer, string $address, int $port) : PromiseInterface{
 		//nothing in the request names the connection, so this side assigns the ID
 		$connectionId = (string) random_int(0, PHP_INT_MAX);
 
@@ -108,13 +129,14 @@ final class EndpointHandler{
 			$deferred->resolve(self::text(503, "Service unavailable"));
 		});
 
-		$this->logger->debug("Endpoint offer from network $networkId, assigned connection $connectionId");
-		//the peer is reached over HTTP rather than a socket address, so there is none to record
+		$this->logger->debug("Endpoint offer from network $networkId at $address:$port, assigned connection $connectionId");
+		//signalling happens over HTTP, but the address is still the player's - bans, rate limits and
+		//logs all key off it, and without it every endpoint player looks like the same anonymous peer
 		$this->transport->acceptOffer(
 			new Signal(Signal::TYPE_OFFER, $connectionId, $offer),
 			$senderNetworkId,
-			"",
-			0,
+			$address,
+			$port,
 			$sink
 		);
 

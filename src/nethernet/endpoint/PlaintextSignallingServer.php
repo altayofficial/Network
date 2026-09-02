@@ -39,6 +39,8 @@ use const STREAM_PEEK;
 final class PlaintextSignallingServer extends EventEmitter implements ServerInterface{
 
 	private const TLS_HANDSHAKE_RECORD = 0x16;
+	//a connection that never says anything holds a socket and a read watcher, so it does not get to wait forever
+	private const FIRST_BYTE_TIMEOUT = 10;
 
 	public function __construct(
 		private ServerInterface $server
@@ -58,8 +60,14 @@ final class PlaintextSignallingServer extends EventEmitter implements ServerInte
 			return;
 		}
 
-		Loop::addReadStream($resource, function() use ($connection, $resource) : void{
+		$timeout = Loop::addTimer(self::FIRST_BYTE_TIMEOUT, static function() use ($connection, $resource) : void{
 			Loop::removeReadStream($resource);
+			$connection->close();
+		});
+
+		Loop::addReadStream($resource, function() use ($connection, $resource, $timeout) : void{
+			Loop::removeReadStream($resource);
+			Loop::cancelTimer($timeout);
 
 			$first = @stream_socket_recvfrom($resource, 1, STREAM_PEEK);
 			if($first === false || strlen($first) === 0){
