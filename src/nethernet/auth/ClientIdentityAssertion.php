@@ -102,6 +102,15 @@ final class ClientIdentityAssertion{
 	 */
 	private static function extractTokenClaims(string $token) : array{
 		$parts = explode(".", $token);
+		$header = json_decode(JwsEs384::base64UrlDecode($parts[0]) ?? "", true);
+		if(!is_array($header)){
+			throw new IdentityException("Identity token header is malformed");
+		}
+		//a server signs its own token with ES384, a client presents one issued with RS256
+		$algorithm = $header["alg"] ?? null;
+		if($algorithm !== "ES384" && $algorithm !== "RS256"){
+			throw new IdentityException("Identity token uses an unsupported algorithm");
+		}
 		$payload = JwsEs384::base64UrlDecode($parts[1]);
 		if($payload === null){
 			throw new IdentityException("Identity token payload is not valid base64");
@@ -118,7 +127,40 @@ final class ClientIdentityAssertion{
 		}
 		//the claim is either a base64 encoded PKIX key or a JSON Web Key object
 		$publicKey = is_string($claims["cpk"]) ? $claims["cpk"] : JwkPublicKey::toBase64Der($claims["cpk"]);
+		if($algorithm === "ES384"){
+			//an ES384 token signs itself with the key it claims, so the pair has to hold up before
+			//anything is built on it. An RS256 token is issued elsewhere and its signature can only be
+			//checked against the issuer's keys, which is the login layer's job
+			self::verifySelfSignature($parts, $publicKey);
+		}
 		return [$claims, $publicKey];
+	}
+
+	/**
+	 * @param string[] $parts
+	 * @throws IdentityException
+	 */
+	private static function verifySelfSignature(array $parts, string $publicKeyBase64) : void{
+		$signature = JwsEs384::base64UrlDecode($parts[2]);
+		if($signature === null){
+			throw new IdentityException("Invalid identity token signature encoding");
+		}
+		if(!JwsEs384::verify($parts[0] . "." . $parts[1], $signature, self::publicKey($publicKeyBase64))){
+			throw new IdentityException("Identity token is not signed by the key it claims");
+		}
+	}
+
+	/**
+	 * @throws IdentityException
+	 */
+	private static function publicKey(string $base64) : \OpenSSLAsymmetricKey{
+		$key = openssl_pkey_get_public(
+			"-----BEGIN PUBLIC KEY-----\n" . chunk_split($base64, 64, "\n") . "-----END PUBLIC KEY-----\n"
+		);
+		if($key === false){
+			throw new IdentityException("Invalid cpk public key in identity token");
+		}
+		return $key;
 	}
 
 	/**
@@ -133,12 +175,7 @@ final class ClientIdentityAssertion{
 			throw new IdentityException("SDP does not contain DTLS fingerprints");
 		}
 
-		$publicKey = openssl_pkey_get_public(
-			"-----BEGIN PUBLIC KEY-----\n" . chunk_split($this->publicKeyBase64, 64, "\n") . "-----END PUBLIC KEY-----\n"
-		);
-		if($publicKey === false){
-			throw new IdentityException("Invalid cpk public key in identity token");
-		}
+		$publicKey = self::publicKey($this->publicKeyBase64);
 
 		$parts = explode(".", $this->fingerprintsJws);
 		$header = json_decode(JwsEs384::base64UrlDecode($parts[0]) ?? "", true);

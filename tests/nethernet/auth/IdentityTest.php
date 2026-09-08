@@ -48,11 +48,12 @@ final class IdentityTest extends TestCase{
 	/**
 	 * @param array<string, mixed>|null $idp
 	 */
-	private function buildClientOffer(string $fingerprint, ?int $exp = null, ?array $idp = ["domain" => "test", "protocol" => "default"], mixed $cpk = null) : string{
+	private function buildClientOffer(string $fingerprint, ?int $exp = null, ?array $idp = ["domain" => "test", "protocol" => "default"], mixed $cpk = null, ?\OpenSSLAsymmetricKey $tokenKey = null, string $algorithm = "ES384") : string{
 		$b64u = fn(string $d) => JwsEs384::base64UrlEncode($d);
 		$header = $b64u(json_encode(["alg" => "ES384"]));
+		$tokenHeader = $b64u(json_encode(["alg" => $algorithm]));
 		$claims = $b64u(json_encode(["cpk" => $cpk ?? $this->clientPublicKey, "exp" => $exp ?? time() + 300]));
-		$token = "$header.$claims." . $b64u(JwsEs384::sign("$header.$claims", $this->clientKey));
+		$token = "$tokenHeader.$claims." . $b64u(JwsEs384::sign("$tokenHeader.$claims", $tokenKey ?? $this->clientKey));
 
 		$sdp = $this->sdp($fingerprint);
 		$payload = SdpFingerprints::canonicalPayload($sdp);
@@ -131,6 +132,29 @@ final class IdentityTest extends TestCase{
 	public function testEmptyIdentityProviderDomainRejected() : void{
 		$this->expectException(IdentityException::class);
 		ClientIdentityAssertion::fromSdp($this->buildClientOffer($this->fingerprint("cert"), null, ["domain" => "", "protocol" => "default"]));
+	}
+
+	public function testTokenSignedByAnotherKeyRejected() : void{
+		$other = openssl_pkey_new(["private_key_type" => OPENSSL_KEYTYPE_EC, "curve_name" => "secp384r1"]);
+
+		$this->expectException(IdentityException::class);
+		ClientIdentityAssertion::fromSdp($this->buildClientOffer($this->fingerprint("cert"), null, ["domain" => "test", "protocol" => "default"], null, $other));
+	}
+
+	public function testUnsupportedTokenAlgorithmRejected() : void{
+		$this->expectException(IdentityException::class);
+		ClientIdentityAssertion::fromSdp($this->buildClientOffer($this->fingerprint("cert"), null, ["domain" => "test", "protocol" => "default"], null, null, "HS256"));
+	}
+
+	public function testIssuedTokenSignatureIsLeftToTheLoginLayer() : void{
+		//an RS256 token comes from Minecraft's authorization service, so its signature cannot be
+		//checked here - only the fingerprint assertion binds it to this connection
+		$other = openssl_pkey_new(["private_key_type" => OPENSSL_KEYTYPE_EC, "curve_name" => "secp384r1"]);
+		$offer = $this->buildClientOffer($this->fingerprint("cert"), null, ["domain" => "test", "protocol" => "default"], null, $other, "RS256");
+
+		$assertion = ClientIdentityAssertion::fromSdp($offer);
+		self::assertNotNull($assertion);
+		$assertion->verify($offer);
 	}
 
 	public function testServerIdentityRoundTrip() : void{
