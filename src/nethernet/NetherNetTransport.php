@@ -130,7 +130,9 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		private ?string $identityKeyPath = null,
 		private string $identityDomain = "self",
 		private bool $relayOnly = false,
-		private bool $requireEndpointIdentity = false
+		private bool $requireEndpointIdentity = false,
+		/** @var string[] */
+		private array $iceInterfaces = []
 	){
 		$this->addressBook = new AddressBook();
 	}
@@ -1058,7 +1060,23 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		if($this->relayOnly){
 			$configuration->iceSettings()->setTransportPolicy(TransportPolicyType::RELAY);
 		}
+		//every local address the ICE agent gathers on costs a socket per player, and a machine
+		//usually has several no player can reach - container bridges, VPNs, a second segment
+		$interfaces = $this->iceInterfaces !== [] ? $this->iceInterfaces : $this->boundInterface();
+		if($interfaces !== []){
+			$configuration->iceSettings()->setInterfaces($interfaces);
+		}
 		return new RTCPeerConnection($configuration);
+	}
+
+	/**
+	 * The address the transport was bound to, when that is an address rather than "everything". An
+	 * operator who names one has already said which network the players are on.
+	 *
+	 * @return string[]
+	 */
+	private function boundInterface() : array{
+		return in_array($this->bindAddress, ["", "0.0.0.0", "::", "[::]"], true) ? [] : [$this->bindAddress];
 	}
 
 	/**
