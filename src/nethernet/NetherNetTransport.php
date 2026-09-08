@@ -80,6 +80,9 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	private const OFFER_RATE_WINDOW = 10;
 	private const MAX_REMOTE_CANDIDATES = 32;
 
+	private int $maxPendingNegotiations = self::MAX_PENDING_NEGOTIATIONS;
+	private int $maxOffersPerAddress = self::MAX_OFFERS_PER_ADDRESS;
+
 	private const ENDPOINT_MAX_CONCURRENT_REQUESTS = 64;
 
 	/**
@@ -124,6 +127,19 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		private bool $requireEndpointIdentity = false
 	){
 		$this->addressBook = new AddressBook();
+	}
+
+	/**
+	 * Raises or lowers what an unauthenticated peer may ask of the transport. The defaults suit a
+	 * server whose players each come from their own address; several players behind one address, or
+	 * a benchmark dialling from a single host, need the per address allowance raised.
+	 */
+	public function setNegotiationLimits(int $maxPendingNegotiations, int $maxOffersPerAddress) : void{
+		if($maxPendingNegotiations < 1 || $maxOffersPerAddress < 1){
+			throw new \InvalidArgumentException("Negotiation limits must be positive");
+		}
+		$this->maxPendingNegotiations = $maxPendingNegotiations;
+		$this->maxOffersPerAddress = $maxOffersPerAddress;
 	}
 
 	public function setCredentials(?Credentials $credentials) : void{
@@ -490,7 +506,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			$this->offerRates[$address] = ["count" => 1, "since" => $now];
 			return true;
 		}
-		if($entry["count"] >= self::MAX_OFFERS_PER_ADDRESS){
+		if($entry["count"] >= $this->maxOffersPerAddress){
 			return false;
 		}
 		$this->offerRates[$address]["count"]++;
@@ -631,13 +647,13 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		if($this->isBlocked($address)){
 			return;
 		}
-		if(count($this->pending) >= self::MAX_PENDING_NEGOTIATIONS){
+		if(count($this->pending) >= $this->maxPendingNegotiations){
 			$this->logger->debug("Rejecting connection $connectionId from $address:$port: " . count($this->pending) . " negotiations already in flight");
 			$sink->write(self::errorSignal($connectionId, SignalErrorCode::FAILED_TO_CREATE_PEER_CONNECTION));
 			return;
 		}
 		if(!$this->withinOfferRate($address)){
-			$this->logger->debug("Rejecting connection $connectionId from $address:$port: too many offers in the last " . self::OFFER_RATE_WINDOW . " seconds");
+			$this->logger->debug("Rejecting connection $connectionId from $address:$port: more than $this->maxOffersPerAddress offers in the last " . self::OFFER_RATE_WINDOW . " seconds");
 			$sink->write(self::errorSignal($connectionId, SignalErrorCode::FAILED_TO_CREATE_PEER_CONNECTION));
 			return;
 		}
