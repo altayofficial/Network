@@ -185,7 +185,8 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		$this->serverData->serverName = $parts[1];
 		$this->serverData->protocol = (int) $parts[2];
 		$this->serverData->gameVersion = $parts[3];
-		$this->serverData->levelName = $parts[7];
+		//the level name is the title of the world card and the seventh field carries the software
+		//name, which is not it - whatever the transport was given at construction stays
 		$this->serverData->playerCount = (int) $parts[4];
 		$this->serverData->maxPlayerCount = (int) $parts[5];
 		$this->serverData->gameType = match($parts[8]){
