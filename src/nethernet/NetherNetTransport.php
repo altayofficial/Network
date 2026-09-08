@@ -66,6 +66,12 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	public const DISCOVERY_PORT = 7551;
 
 	private const PENDING_NEGOTIATION_TIMEOUT = 15;
+	/**
+	 * How long an established session may stay silent. The peer connection reports nothing when a
+	 * client disappears without closing, so without this the session - and the handful of sockets
+	 * its ICE agent holds - would stay for as long as the server runs.
+	 */
+	private const SESSION_IDLE_TIMEOUT = 30;
 	private const MAINTENANCE_INTERVAL = 1;
 	private const SIGNAL_SOCKET_BUFFER = 4 * 1024 * 1024;
 	private const SIGNAL_RETRANSMIT_INTERVAL = 2;
@@ -313,6 +319,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			$this->retransmitPendingSignals();
 			$this->expireStalePending($now);
 			$this->expireUnreadySessions($now);
+			$this->expireIdleSessions($now);
 			$this->expireRateLimits($now);
 			$this->addressBook->expire($now);
 			$this->reportBandwidth();
@@ -382,6 +389,15 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			if(!$session->isOpenNotified() && $now - $session->getCreatedAt() >= self::PENDING_NEGOTIATION_TIMEOUT){
 				$this->logger->debug("Dropping session $sessionId, its data channels did not open in time");
 				$this->closeSession($sessionId, "data channels did not open in time");
+			}
+		}
+	}
+
+	private function expireIdleSessions(int $now) : void{
+		foreach($this->sessions as $sessionId => $session){
+			if($session->isOpenNotified() && $now - $session->getLastReceiveAt() >= self::SESSION_IDLE_TIMEOUT){
+				$this->logger->debug("Dropping session $sessionId, nothing received for " . self::SESSION_IDLE_TIMEOUT . " seconds");
+				$this->closeSession($sessionId, "timeout");
 			}
 		}
 	}

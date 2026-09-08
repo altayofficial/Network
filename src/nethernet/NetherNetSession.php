@@ -60,6 +60,7 @@ final class NetherNetSession implements TransportSession{
 	private int $bytesSent = 0;
 	private int $bytesReceived = 0;
 	private int $createdAt;
+	private int $lastReceiveAt;
 
 	/** @var \Closure(string) : void */
 	private \Closure $packetHandler;
@@ -81,6 +82,7 @@ final class NetherNetSession implements TransportSession{
 		$this->closeHandler = $closeHandler;
 		$this->ackHandler = $ackHandler;
 		$this->createdAt = time();
+		$this->lastReceiveAt = $this->createdAt;
 		$this->reliableAssembler = new MessageAssembler(true, AnswerRewriter::MAX_MESSAGE_SIZE, self::MAX_PACKET_SIZE);
 		$this->unreliableAssembler = new MessageAssembler(false, AnswerRewriter::MAX_MESSAGE_SIZE, self::MAX_PACKET_SIZE);
 	}
@@ -167,6 +169,15 @@ final class NetherNetSession implements TransportSession{
 		return $this->createdAt;
 	}
 
+	/**
+	 * When this session last had anything to say. A peer that goes away without closing - a crashed
+	 * client, a laptop lid, a router - leaves its connection looking perfectly healthy from here,
+	 * and nothing below this layer will ever tell us otherwise.
+	 */
+	public function getLastReceiveAt() : int{
+		return $this->lastReceiveAt;
+	}
+
 	public function isOpenNotified() : bool{
 		return $this->openNotified;
 	}
@@ -199,6 +210,7 @@ final class NetherNetSession implements TransportSession{
 			return;
 		}
 		$this->bytesReceived += strlen($data);
+		$this->lastReceiveAt = time();
 		try{
 			$packet = $assembler->push($data);
 		}catch(MessageFormatException $e){
@@ -233,7 +245,9 @@ final class NetherNetSession implements TransportSession{
 	}
 
 	public function sendPacket(string $payload, bool $immediate = false, ?int $receiptId = null) : void{
-		if(!$this->connected || $this->reliableChannel === null){
+		//a session exists from the moment its connection does, but the channel only carries anything
+		//once the peer has opened it - and it stops carrying the moment the peer goes away
+		if(!$this->connected || !self::isChannelOpen($this->reliableChannel)){
 			return;
 		}
 		$length = strlen($payload);
@@ -258,7 +272,7 @@ final class NetherNetSession implements TransportSession{
 	 * a single message is rejected rather than sent in a form the peer could never reassemble.
 	 */
 	public function sendUnreliablePacket(string $payload) : void{
-		if(!$this->connected || $this->unreliableChannel === null){
+		if(!$this->connected || !self::isChannelOpen($this->unreliableChannel)){
 			return;
 		}
 		$length = strlen($payload);
@@ -270,7 +284,15 @@ final class NetherNetSession implements TransportSession{
 
 	private function sendSegment(RTCDataChannel $channel, int $remaining, string $payload) : void{
 		$segment = chr($remaining) . $payload;
-		$channel->send($segment, true);
+		try{
+			$channel->send($segment, true);
+		}catch(\RuntimeException $e){
+			//the channel can close between the check above and the write, and a peer disappearing
+			//mid-send must not take the caller with it
+			$this->closeWithError("data channel refused a write: " . $e->getMessage());
+
+			return;
+		}
 		$this->bytesSent += strlen($segment);
 	}
 
