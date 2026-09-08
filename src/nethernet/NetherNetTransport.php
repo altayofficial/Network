@@ -684,10 +684,15 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			$sink->write(self::errorSignal($connectionId, SignalErrorCode::IDENTITY_VERIFICATION_FAILED));
 			return;
 		}
-		if($assertion === null && ($requireIdentity ?? $this->requireIdentity)){
-			$this->logger->info("Rejecting connection $connectionId from $address:$port: identity assertion required but not provided");
-			$sink->write(self::errorSignal($connectionId, SignalErrorCode::IDENTITY_VERIFICATION_FAILED));
-			return;
+		if($assertion === null){
+			//worth seeing in a log: whether a client signs its offer decides whether requiring one is
+			//safe to turn on, and the answer differs between joining by address and over the network
+			$this->logger->debug("Connection $connectionId from $address:$port carries no identity assertion");
+			if($requireIdentity ?? $this->requireIdentity){
+				$this->logger->info("Rejecting connection $connectionId from $address:$port: identity assertion required but not provided");
+				$sink->write(self::errorSignal($connectionId, SignalErrorCode::IDENTITY_VERIFICATION_FAILED));
+				return;
+			}
 		}
 
 		try{
