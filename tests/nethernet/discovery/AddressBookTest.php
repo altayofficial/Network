@@ -68,4 +68,33 @@ final class AddressBookTest extends TestCase{
 
 		self::assertNull($book->lookup(42));
 	}
+
+	public function testFullBookDropsUnknownNetworks() : void{
+		$book = new AddressBook(60, 2);
+		self::assertTrue($book->remember(1, "10.0.0.1", 7551, 1000));
+		self::assertTrue($book->remember(2, "10.0.0.2", 7551, 1000));
+
+		self::assertFalse($book->remember(3, "10.0.0.3", 7551, 1000));
+		self::assertNull($book->lookup(3));
+		self::assertSame(2, $book->count());
+	}
+
+	public function testFullBookMakesRoomByExpiring() : void{
+		$book = new AddressBook(60, 2);
+		$book->remember(1, "10.0.0.1", 7551, 1000);
+		$book->remember(2, "10.0.0.2", 7551, 1000);
+
+		self::assertTrue($book->remember(3, "10.0.0.3", 7551, 1100));
+		self::assertSame(["10.0.0.3", 7551], $book->lookup(3));
+		self::assertSame(1, $book->count());
+	}
+
+	public function testKnownNetworkIsStillRememberedWhenFull() : void{
+		$book = new AddressBook(60, 2);
+		$book->remember(1, "10.0.0.1", 7551, 1000);
+		$book->remember(2, "10.0.0.2", 7551, 1000);
+
+		self::assertTrue($book->remember(1, "10.0.0.9", 7552, 1010));
+		self::assertSame(["10.0.0.9", 7552], $book->lookup(1));
+	}
 }

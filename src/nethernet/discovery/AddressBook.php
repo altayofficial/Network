@@ -33,12 +33,29 @@ final class AddressBook{
 	/** @var array<int, array{address: string, port: int, seenAt: int}> */
 	private array $entries = [];
 
+	/**
+	 * @param int $maxEntries Upper bound on the networks tracked at once. A sender ID is whatever the
+	 *                        datagram claims it is, so without a cap anyone who can reach the discovery
+	 *                        port could grow this table for as long as the timeout lets them.
+	 */
 	public function __construct(
-		private int $timeout = 60
+		private int $timeout = 60,
+		private int $maxEntries = 256
 	){}
 
-	public function remember(int $networkId, string $address, int $port, int $now) : void{
+	/**
+	 * @return bool false when the table is full of networks that are still live and this one is not
+	 *         already among them
+	 */
+	public function remember(int $networkId, string $address, int $port, int $now) : bool{
+		if(!isset($this->entries[$networkId]) && count($this->entries) >= $this->maxEntries){
+			$this->expire($now);
+			if(count($this->entries) >= $this->maxEntries){
+				return false;
+			}
+		}
 		$this->entries[$networkId] = ["address" => $address, "port" => $port, "seenAt" => $now];
+		return true;
 	}
 
 	/**

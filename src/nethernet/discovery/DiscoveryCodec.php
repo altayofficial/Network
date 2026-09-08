@@ -33,6 +33,13 @@ final class DiscoveryCodec{
 
 	private const CHECKSUM_LENGTH = 32;
 	private const HEADER_PADDING = 8;
+	private const CIPHER_BLOCK_LENGTH = 16;
+	/**
+	 * Discovery rides on a single datagram and the signalling messages in it are SDP sized, so
+	 * anything past this was never ours. The checksum covers the plaintext and cannot be checked
+	 * before decrypting, so the cheap length tests are all that keeps junk away from the cipher.
+	 */
+	private const MAX_CIPHERTEXT_LENGTH = 64 * 1024;
 
 	private function __construct(){
 
@@ -55,7 +62,8 @@ final class DiscoveryCodec{
 	 * @return array{DiscoveryPacket, int}|null packet and sender network ID, null if the datagram is not a valid discovery packet
 	 */
 	public static function unmarshal(string $bytes) : ?array{
-		if(strlen($bytes) < self::CHECKSUM_LENGTH){
+		$ciphertextLength = strlen($bytes) - self::CHECKSUM_LENGTH;
+		if($ciphertextLength <= 0 || $ciphertextLength % self::CIPHER_BLOCK_LENGTH !== 0 || $ciphertextLength > self::MAX_CIPHERTEXT_LENGTH){
 			return null;
 		}
 		$payload = DiscoveryCrypto::decrypt(substr($bytes, self::CHECKSUM_LENGTH));

@@ -47,6 +47,13 @@ final class DiscoveryCodecTest extends TestCase{
 		self::assertNull(DiscoveryCodec::unmarshal(str_repeat("\x00", 64)));
 	}
 
+	public function testRejectsCiphertextTheCipherCouldNotHaveProduced() : void{
+		//no block cipher output is a partial block, so these never reach the cipher or the MAC
+		self::assertNull(DiscoveryCodec::unmarshal(str_repeat("\x00", 32)));
+		self::assertNull(DiscoveryCodec::unmarshal(str_repeat("\x00", 32 + 17)));
+		self::assertNull(DiscoveryCodec::unmarshal(str_repeat("\x00", 32 + 64 * 1024 + 16)));
+	}
+
 	public function testRejectsTamperedChecksum() : void{
 		$encoded = DiscoveryCodec::marshal(new DiscoveryRequestPacket(), 1);
 		$encoded[0] = $encoded[0] === "\x00" ? "\x01" : "\x00";
