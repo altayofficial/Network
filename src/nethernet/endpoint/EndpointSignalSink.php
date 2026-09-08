@@ -42,9 +42,14 @@ final class EndpointSignalSink implements SignalSink{
 		$this->onReply = $onReply;
 	}
 
+	public function supportsTrickle() : bool{
+		//an HTTP request is answered once, so a candidate signalled afterwards has nowhere to go
+		return false;
+	}
+
 	public function write(Signal $signal) : void{
 		if($signal->type === Signal::TYPE_CANDIDATE){
-			//already embedded in the answer, since the library gathers before it resolves
+			//the answer waits for gathering to finish, so these are already embedded in it
 			return;
 		}
 		if($this->reply !== null){

@@ -137,7 +137,8 @@ final class EndpointHandler{
 			$senderNetworkId,
 			$address,
 			$port,
-			$sink
+			$sink,
+			$this->transport->endpointRequiresIdentity()
 		);
 
 		if(!$sink->hasReplied()){

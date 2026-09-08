@@ -53,9 +53,12 @@ use React\Socket\SocketServer;
 use function React\Promise\set_rejection_handler;
 use Webrtc\DataChannel\RTCDataChannel;
 use Webrtc\DataChannel\RTCDataChannelParameters;
+use Webrtc\ICE\Enum\IceGatheringState;
+use Webrtc\ICE\Enum\TransportPolicyType;
 use Webrtc\ICE\RTCIceCandidate;
 use Webrtc\SDP\RTCSessionDescription;
 use Webrtc\Webrtc\Enum\ConnectionState;
+use Webrtc\Webrtc\RTCConfiguration;
 use Webrtc\Webrtc\RTCPeerConnection;
 
 final class NetherNetTransport implements NameableTransport, AddressBlockingTransport{
@@ -78,6 +81,13 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	private const MAX_REMOTE_CANDIDATES = 32;
 
 	private const ENDPOINT_MAX_CONCURRENT_REQUESTS = 64;
+
+	/**
+	 * How long a signalling channel that cannot carry candidates on their own waits for gathering to
+	 * finish. A TURN server that never answers must not hold the description back forever, so the
+	 * peer gets whatever was gathered by the time this runs out.
+	 */
+	private const GATHERING_TIMEOUT = 5;
 
 	private ?\Socket $socket = null;
 	private ?SocketServer $endpointSocket = null;
@@ -108,7 +118,10 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		private bool $requireIdentity = false,
 		private ?Credentials $credentials = null,
 		private ?string $endpointAddress = null,
-		private ?string $identityKeyPath = null
+		private ?string $identityKeyPath = null,
+		private string $identityDomain = "self",
+		private bool $relayOnly = false,
+		private bool $requireEndpointIdentity = false
 	){
 		$this->addressBook = new AddressBook();
 	}
@@ -221,13 +234,13 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	private function makeIdentity() : ServerIdentity{
 		if($this->identityKeyPath !== null){
 			try{
-				return ServerIdentity::loadOrCreate($this->identityKeyPath);
+				return ServerIdentity::loadOrCreate($this->identityKeyPath, $this->identityDomain);
 			}catch(\RuntimeException $e){
 				$this->logger->warning("Failed to use the NetherNet identity key at $this->identityKeyPath: " . $e->getMessage());
 				$this->logger->warning("Falling back to a temporary identity, which changes on every restart.");
 			}
 		}
-		return ServerIdentity::generate();
+		return ServerIdentity::generate($this->identityDomain);
 	}
 
 	/**
@@ -498,7 +511,9 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		if($senderId === $this->networkId){
 			return;
 		}
-		$this->addressBook->remember($senderId, $address, $port, time());
+		if(!$this->addressBook->remember($senderId, $address, $port, time())){
+			$this->logger->debug("Not tracking network $senderId at $address:$port, the address book is full of live networks");
+		}
 
 		if($packet instanceof DiscoveryRequestPacket){
 			//every client on the network asks for this every couple of seconds, and the answer only
@@ -506,7 +521,9 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			$this->discoveryResponse ??= DiscoveryCodec::marshal(new DiscoveryResponsePacket($this->serverData->encode()), $this->networkId);
 			$this->sendDatagram($this->discoveryResponse, $address, $port);
 		}elseif($packet instanceof DiscoveryMessagePacket){
-			if($packet->recipientId !== $this->networkId){
+			//a recipient of zero addresses whoever picks the message up, which is how some clients
+			//signal before they have learned the network ID they are talking to
+			if($packet->recipientId !== 0 && $packet->recipientId !== $this->networkId){
 				$this->logger->debug("Ignoring discovery message from $address:$port intended for network " . $packet->recipientId);
 				return;
 			}
@@ -578,7 +595,20 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		));
 	}
 
-	public function acceptOffer(Signal $signal, int $senderNetworkId, string $address, int $port, SignalSink $sink) : void{
+	/**
+	 * Whether an offer that arrived over the signalling endpoint has to carry an identity assertion.
+	 * A player who reaches the server through it is signed in and always presents one, unlike the
+	 * clients that find the server by broadcasting on the local network.
+	 */
+	public function endpointRequiresIdentity() : bool{
+		return $this->requireEndpointIdentity;
+	}
+
+	/**
+	 * @param bool|null $requireIdentity overrides the policy the transport was configured with, for
+	 *                                   signalling channels that hold their peers to a different one
+	 */
+	public function acceptOffer(Signal $signal, int $senderNetworkId, string $address, int $port, SignalSink $sink, ?bool $requireIdentity = null) : void{
 		$connectionId = $signal->connectionId;
 		try{
 			$sessionId = Uint64::toSignedInt($connectionId);
@@ -620,7 +650,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			$sink->write(self::errorSignal($connectionId, SignalErrorCode::IDENTITY_VERIFICATION_FAILED));
 			return;
 		}
-		if($assertion === null && $this->requireIdentity){
+		if($assertion === null && ($requireIdentity ?? $this->requireIdentity)){
 			$this->logger->info("Rejecting connection $connectionId from $address:$port: identity assertion required but not provided");
 			$sink->write(self::errorSignal($connectionId, SignalErrorCode::IDENTITY_VERIFICATION_FAILED));
 			return;
@@ -670,21 +700,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			->then(fn() => $connection->createAnswer())
 			->then(fn(RTCSessionDescription $answer) => $connection->setLocalDescription($answer))
 			->then(function() use ($connection, $connectionId, $sink) : void{
-				$local = $connection->getLocalDescription();
-				if($local === null){
-					$this->dropConnection($connectionId, "no local description", SignalErrorCode::FAILED_TO_SET_LOCAL_DESCRIPTION);
-					return;
-				}
-				$sdp = AnswerRewriter::conform($local->getSdp());
-				$this->logger->debug("Sending answer for connection $connectionId");
-				$answer = $this->withIdentityAttribute($sdp);
-				//kept so a repeated offer can be answered without renegotiating from scratch
-				if(isset($this->pending[$connectionId])){
-					$this->pending[$connectionId]["answer"] = $answer;
-					$this->pending[$connectionId]["lastSignalAt"] = microtime(true);
-				}
-				$sink->write(new Signal(Signal::TYPE_ANSWER, $connectionId, $answer));
-				$this->trickleCandidates($sdp, $connectionId, $sink);
+				$this->publishDescription($connection, $connectionId, $sink, Signal::TYPE_ANSWER);
 			})
 			->catch(function(\Throwable $e) use ($connectionId) : void{
 				$this->logger->error("NetherNet negotiation failed for connection $connectionId: " . $e->getMessage());
@@ -882,7 +898,9 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 						$this->dropConnection($connectionId, "endpoint rejected the offer");
 					}
 				);
-			}
+			},
+			//an endpoint answers the request that carried the offer, so candidates have to be in it
+			false
 		));
 	}
 
@@ -947,21 +965,8 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		$connection->createOffer()
 			->then(fn(RTCSessionDescription $offer) => $connection->setLocalDescription($offer))
 			->then(function() use ($connection, $connectionId, $networkId, $sink) : void{
-				$local = $connection->getLocalDescription();
-				if($local === null){
-					$this->dropConnection($connectionId, "no local description", SignalErrorCode::FAILED_TO_SET_LOCAL_DESCRIPTION);
-					return;
-				}
-				$sdp = AnswerRewriter::conform($local->getSdp());
-				$this->logger->debug("Sending offer for connection $connectionId to network $networkId");
-				$offer = $this->withIdentityAttribute($sdp);
-				//kept so the offer can be repeated if no answer comes back
-				if(isset($this->pending[$connectionId])){
-					$this->pending[$connectionId]["offer"] = $offer;
-					$this->pending[$connectionId]["lastSignalAt"] = microtime(true);
-				}
-				$sink->write(new Signal(Signal::TYPE_OFFER, $connectionId, $offer));
-				$this->trickleCandidates($sdp, $connectionId, $sink);
+				$this->logger->debug("Offering connection $connectionId to network $networkId");
+				$this->publishDescription($connection, $connectionId, $sink, Signal::TYPE_OFFER);
 			})
 			->catch(function(\Throwable $e) use ($connectionId) : void{
 				$this->logger->error("NetherNet dial failed for connection $connectionId: " . $e->getMessage());
@@ -1008,17 +1013,20 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	}
 
 	private function createPeerConnection() : RTCPeerConnection{
-		if($this->credentials === null || $this->credentials->isExpired()){
-			if($this->credentials !== null){
-				$this->logger->debug("Discarding expired NetherNet credentials");
-				$this->credentials = null;
-			}
-			//without an explicit list the library falls back to a public STUN server, which means an
-			//internet round trip per connection just to learn a reflexive candidate that a LAN peer
-			//can never use. Signalling here is local, so host candidates are all that is wanted.
-			return new RTCPeerConnection($this->withSharedCertificate(["iceServers" => []]));
+		if($this->credentials !== null && $this->credentials->isExpired()){
+			$this->logger->debug("Discarding expired NetherNet credentials");
+			$this->credentials = null;
 		}
-		return new RTCPeerConnection($this->withSharedCertificate($this->credentials->toPeerConnectionConfiguration()));
+		//without an explicit list the library falls back to a public STUN server, which means an
+		//internet round trip per connection just to learn a reflexive candidate that a LAN peer can
+		//never use. Signalling on the discovery socket is local, so host candidates are all it wants.
+		$configuration = new RTCConfiguration($this->withSharedCertificate(
+			$this->credentials?->toPeerConnectionConfiguration() ?? ["iceServers" => []]
+		));
+		if($this->relayOnly){
+			$configuration->iceSettings()->setTransportPolicy(TransportPolicyType::RELAY);
+		}
+		return new RTCPeerConnection($configuration);
 	}
 
 	/**
@@ -1031,6 +1039,18 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			$configuration["privateKeyPath"] = $this->certificateFiles->privateKeyPath;
 		}
 		return $configuration;
+	}
+
+	/**
+	 * Broadcasts a discovery request so that the servers on this network answer with what they are
+	 * hosting. Nothing on the server side needs this, it is what a client does to find them.
+	 */
+	public function broadcastDiscoveryRequest(string $address = "255.255.255.255", ?int $port = null) : void{
+		$this->sendDatagram(
+			DiscoveryCodec::marshal(new DiscoveryRequestPacket(), $this->networkId),
+			$address,
+			$port ?? self::DISCOVERY_PORT
+		);
 	}
 
 	public function signalNetwork(Signal $signal, int $recipientNetworkId) : bool{
@@ -1074,14 +1094,108 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		return substr($sdp, 0, $position) . "a=identity:$attribute\r\n" . substr($sdp, $position);
 	}
 
-	private function trickleCandidates(string $sdp, string $connectionId, SignalSink $sink) : void{
+	/**
+	 * Signals the local description and the candidates that belong to it.
+	 *
+	 * A sink that can carry candidates on their own gets the description straight away and the
+	 * candidates as they are gathered, which is what a LAN peer expects. One that cannot gets the
+	 * description only once gathering has finished, since the candidates in it are the only ones the
+	 * peer will ever see.
+	 */
+	private function publishDescription(RTCPeerConnection $connection, string $connectionId, SignalSink $sink, string $type) : void{
+		$send = function() use ($connection, $connectionId, $sink, $type) : void{
+			$local = $connection->getLocalDescription();
+			if($local === null){
+				$this->dropConnection($connectionId, "no local description", SignalErrorCode::FAILED_TO_SET_LOCAL_DESCRIPTION);
+				return;
+			}
+			$sdp = AnswerRewriter::conform($local->getSdp());
+			$description = $this->withIdentityAttribute($sdp);
+			//kept so a repeated offer can be answered, and a lost offer repeated, without renegotiating
+			if(isset($this->pending[$connectionId])){
+				$this->pending[$connectionId][$type === Signal::TYPE_OFFER ? "offer" : "answer"] = $description;
+				$this->pending[$connectionId]["lastSignalAt"] = microtime(true);
+			}
+			$this->logger->debug("Sending " . ($type === Signal::TYPE_OFFER ? "offer" : "answer") . " for connection $connectionId");
+			$sink->write(new Signal($type, $connectionId, $description));
+			if($sink->supportsTrickle()){
+				$this->trickleCandidates($connection, $sdp, $connectionId, $sink);
+			}
+		};
+
+		if($sink->supportsTrickle() || $connection->getIceGatheringState() === IceGatheringState::complete){
+			$send();
+			return;
+		}
+
+		$this->logger->debug("Holding the description of connection $connectionId until candidate gathering finishes");
+		$sent = false;
+		$timer = Loop::addTimer(self::GATHERING_TIMEOUT, function() use (&$sent, $send, $connectionId) : void{
+			if($sent){
+				return;
+			}
+			$sent = true;
+			$this->logger->debug("Candidate gathering for connection $connectionId did not finish in time, sending what was gathered");
+			$send();
+		});
+		$connection->on("icegatheringstatechange", function() use ($connection, &$sent, $send, $timer) : void{
+			if($sent || $connection->getIceGatheringState() !== IceGatheringState::complete){
+				return;
+			}
+			$sent = true;
+			Loop::cancelTimer($timer);
+			$send();
+		});
+	}
+
+	/**
+	 * Signals the candidates gathered so far and keeps signalling the ones that turn up later. A
+	 * reflexive or relayed candidate costs a round trip to the STUN or TURN server, so it lands well
+	 * after the description does.
+	 */
+	private function trickleCandidates(RTCPeerConnection $connection, string $sdp, string $connectionId, SignalSink $sink) : void{
 		$ufrag = SessionDescription::attribute($sdp, "ice-ufrag");
 		if($ufrag === null){
 			$this->logger->debug("Local description for connection $connectionId has no ice-ufrag, not signalling candidates");
 			return;
 		}
-		foreach(IceCandidate::parseAll($sdp) as $networkId => $candidate){
-			$sink->write(new Signal(Signal::TYPE_CANDIDATE, $connectionId, $candidate->format($networkId, $ufrag)));
+
+		$signalled = [];
+		$flush = function() use ($connection, $connectionId, $sink, $ufrag, &$signalled) : void{
+			foreach(self::localCandidates($connection) as $networkId => $candidate){
+				$line = $candidate->format($networkId, $ufrag);
+				if(isset($signalled[$line])){
+					continue;
+				}
+				$signalled[$line] = true;
+				$sink->write(new Signal(Signal::TYPE_CANDIDATE, $connectionId, $line));
+			}
+		};
+
+		$flush();
+		if($connection->getIceGatheringState() !== IceGatheringState::complete){
+			$connection->on("icegatheringstatechange", $flush);
 		}
+	}
+
+	/**
+	 * The candidates the connection has gathered by now. The local description is a snapshot taken
+	 * when it was set, so the gatherer is the only place a candidate found later shows up.
+	 *
+	 * @return IceCandidate[]
+	 */
+	private static function localCandidates(RTCPeerConnection $connection) : array{
+		$gatherer = $connection->getSctp()?->getDtlsTransport()->getIceTransport()->getIceGatherer();
+		if($gatherer === null){
+			return [];
+		}
+		$candidates = [];
+		foreach($gatherer->getLocalCandidates() as $candidate){
+			$parsed = IceCandidate::parse("candidate:" . $candidate);
+			if($parsed !== null){
+				$candidates[] = $parsed;
+			}
+		}
+		return $candidates;
 	}
 }

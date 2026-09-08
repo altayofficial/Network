@@ -53,7 +53,7 @@ final class ServerData{
 		public bool $acceptsOnlineAuth = false,
 		public bool $acceptsSelfSignedAuth = true,
 		public string $nonce = "",
-		public ConnectionType $connectionType = ConnectionType::LAN_SIGNALING
+		public int $connectionType = ConnectionType::LAN_SIGNALING
 	){
 		if($this->nonce === ""){
 			$this->nonce = self::generateNonce();
@@ -83,7 +83,7 @@ final class ServerData{
 		$out->putBool($this->acceptsOnlineAuth);
 		$out->putBool($this->acceptsSelfSignedAuth);
 		$out->putString($this->nonce);
-		$out->putVarInt($this->connectionType->value);
+		$out->putVarInt($this->connectionType);
 		return $out->getBuffer();
 	}
 
@@ -127,7 +127,8 @@ final class ServerData{
 			$acceptsOnlineAuth,
 			$acceptsSelfSignedAuth,
 			$nonce,
-			ConnectionType::tryFrom($connectionTypeId) ?? throw new BinaryDataException("Unknown connection type $connectionTypeId")
+			//only LAN signalling is meaningful here, but the rest of the data is still worth having
+			$connectionTypeId
 		);
 		//an empty nonce would otherwise be replaced by a freshly generated one in the constructor
 		$data->nonce = $nonce;

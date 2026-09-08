@@ -28,4 +28,11 @@ namespace altay\network\nethernet;
 interface SignalSink{
 
 	public function write(Signal $signal) : void;
+
+	/**
+	 * Whether candidates may be signalled on their own after the offer or the answer has been sent.
+	 * A sink that cannot carry them leaves the local description as the only chance to hand them
+	 * over, so gathering has to finish before it is written.
+	 */
+	public function supportsTrickle() : bool;
 }

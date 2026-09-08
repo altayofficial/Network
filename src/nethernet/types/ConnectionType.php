@@ -25,8 +25,15 @@ declare(strict_types=1);
 
 namespace altay\network\nethernet\types;
 
-enum ConnectionType : int
-{
-    // TODO: other missing connection types
-    case LAN_SIGNALING = 4;
+/**
+ * The transport a world is signalled over. Only the LAN value is known for certain, and a peer is
+ * free to advertise one this list has never heard of, so nothing may depend on the set being whole.
+ */
+final class ConnectionType{
+
+	public const LAN_SIGNALING = 4;
+
+	private function __construct(){
+
+	}
 }

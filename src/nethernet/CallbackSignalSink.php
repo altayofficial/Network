@@ -32,12 +32,17 @@ final class CallbackSignalSink implements SignalSink{
 
 	/**
 	 * @param \Closure(Signal) : void $handler
+	 * @param bool $trickle whether the handler can still carry candidates once the description is out
 	 */
-	public function __construct(\Closure $handler){
+	public function __construct(\Closure $handler, private bool $trickle = true){
 		$this->handler = $handler;
 	}
 
 	public function write(Signal $signal) : void{
 		($this->handler)($signal);
+	}
+
+	public function supportsTrickle() : bool{
+		return $this->trickle;
 	}
 }

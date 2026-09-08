@@ -40,4 +40,8 @@ final class DatagramSignalSink implements SignalSink{
 	public function write(Signal $signal) : void{
 		($this->send)($signal, $this->recipientNetworkId, $this->address, $this->port);
 	}
+
+	public function supportsTrickle() : bool{
+		return true;
+	}
 }
