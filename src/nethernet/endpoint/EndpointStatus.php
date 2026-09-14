@@ -26,13 +26,18 @@ declare(strict_types=1);
 namespace altay\network\nethernet\endpoint;
 
 use altay\network\nethernet\ServerData;
+use altay\network\nethernet\types\ConnectionType;
 use function is_array;
+use function is_bool;
 use function is_int;
 use function is_string;
 use function json_decode;
 use function json_encode;
 
 final class EndpointStatus{
+
+	/** NetherNet. The field exists because a world can be hosted over something else. */
+	public const TRANSPORT_LAYER_NETHERNET = 2;
 
 	public function __construct(
 		public string $serverName,
@@ -41,7 +46,15 @@ final class EndpointStatus{
 		public string $levelName,
 		public int $playerCount,
 		public int $maxPlayerCount,
-		public int $gameType
+		public int $gameType,
+		public bool $editorWorld = false,
+		public bool $hardcore = false,
+		public bool $acceptsOnlineAuth = false,
+		public bool $acceptsSelfSignedAuth = true,
+		public string $nonce = "",
+		public int $dataVersion = ServerData::VERSION,
+		public int $transportLayer = self::TRANSPORT_LAYER_NETHERNET,
+		public int $connectionType = ConnectionType::LAN_SIGNALING
 	){}
 
 	public static function fromServerData(ServerData $data) : self{
@@ -52,7 +65,17 @@ final class EndpointStatus{
 			$data->levelName,
 			$data->playerCount,
 			$data->maxPlayerCount,
-			$data->gameType
+			$data->gameType,
+			$data->editorWorld,
+			$data->hardcore,
+			$data->acceptsOnlineAuth,
+			$data->acceptsSelfSignedAuth,
+			//the client echoes this back in the ClientData of its login, so the status has to carry
+			//the nonce the rest of the transport advertises rather than one of its own
+			$data->nonce,
+			ServerData::VERSION,
+			self::TRANSPORT_LAYER_NETHERNET,
+			$data->connectionType
 		);
 	}
 
@@ -71,19 +94,36 @@ final class EndpointStatus{
 			self::readString($decoded, "level"),
 			self::readInt($decoded, "players"),
 			self::readInt($decoded, "maxPlayers"),
-			self::readInt($decoded, "gameType")
+			self::readInt($decoded, "gameType"),
+			//the rest may be left out, and the server shipped with the game does leave it out
+			self::readOptionalBool($decoded, "editor", false),
+			self::readOptionalBool($decoded, "hardcore", false),
+			self::readOptionalBool($decoded, "onlineAuth", false),
+			self::readOptionalBool($decoded, "selfSignedAuth", true),
+			self::readOptionalString($decoded, "nonce", ""),
+			self::readOptionalInt($decoded, "dataVersion", ServerData::VERSION),
+			self::readOptionalInt($decoded, "transportLayer", self::TRANSPORT_LAYER_NETHERNET),
+			self::readOptionalInt($decoded, "connection", ConnectionType::LAN_SIGNALING)
 		);
 	}
 
 	public function toJson() : string{
 		$json = json_encode([
+			"dataVersion" => $this->dataVersion,
 			"name" => $this->serverName,
 			"protocol" => $this->protocol,
 			"version" => $this->gameVersion,
 			"level" => $this->levelName,
 			"players" => $this->playerCount,
 			"maxPlayers" => $this->maxPlayerCount,
-			"gameType" => $this->gameType
+			"gameType" => $this->gameType,
+			"editor" => $this->editorWorld,
+			"hardcore" => $this->hardcore,
+			"onlineAuth" => $this->acceptsOnlineAuth,
+			"selfSignedAuth" => $this->acceptsSelfSignedAuth,
+			"nonce" => $this->nonce,
+			"transportLayer" => $this->transportLayer,
+			"connection" => $this->connectionType
 		]);
 		if($json === false){
 			throw new \RuntimeException("Failed to encode endpoint status");
@@ -113,6 +153,40 @@ final class EndpointStatus{
 		$value = $data[$key] ?? null;
 		if(!is_int($value)){
 			throw new EndpointException("Endpoint status field \"$key\" is not an integer");
+		}
+		return $value;
+	}
+
+	/**
+	 * @param mixed[] $data
+	 *
+	 * @throws EndpointException
+	 */
+	private static function readOptionalString(array $data, string $key, string $default) : string{
+		return isset($data[$key]) ? self::readString($data, $key) : $default;
+	}
+
+	/**
+	 * @param mixed[] $data
+	 *
+	 * @throws EndpointException
+	 */
+	private static function readOptionalInt(array $data, string $key, int $default) : int{
+		return isset($data[$key]) ? self::readInt($data, $key) : $default;
+	}
+
+	/**
+	 * @param mixed[] $data
+	 *
+	 * @throws EndpointException
+	 */
+	private static function readOptionalBool(array $data, string $key, bool $default) : bool{
+		if(!isset($data[$key])){
+			return $default;
+		}
+		$value = $data[$key];
+		if(!is_bool($value)){
+			throw new EndpointException("Endpoint status field \"$key\" is not a boolean");
 		}
 		return $value;
 	}

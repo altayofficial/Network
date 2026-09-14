@@ -138,7 +138,8 @@ final class EndpointHandler{
 			$address,
 			$port,
 			$sink,
-			$this->transport->endpointRequiresIdentity()
+			$this->transport->endpointRequiresIdentity(),
+			$this->transport->endpointTokenTrust()
 		);
 
 		if(!$sink->hasReplied()){

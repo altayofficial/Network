@@ -27,6 +27,13 @@ namespace altay\network\nethernet\auth;
 
 final class ClientIdentityAssertion{
 
+	/**
+	 * The service that issues the tokens signed in clients present. It writes the claim with a
+	 * trailing slash, but the form without one is accepted too so an issuer copied from the
+	 * discovery document still matches.
+	 */
+	private const AUTH_ISSUER = "https://authorization.franchise.minecraft-services.net";
+
 	private function __construct(
 		private string $fingerprintsJws,
 		private string $token,
@@ -53,9 +60,11 @@ final class ClientIdentityAssertion{
 	 * Parses the 'a=identity' attribute from an SDP. Returns null when the SDP does not
 	 * carry an identity assertion, throws when it carries a malformed one.
 	 *
+	 * @param TokenTrust $trust who the token has to come from for the claims to be believed
+	 *
 	 * @throws IdentityException
 	 */
-	public static function fromSdp(string $sdp) : ?self{
+	public static function fromSdp(string $sdp, TokenTrust $trust = TokenTrust::ANY) : ?self{
 		if(preg_match('/^a=identity:(\S+)\s*$/m', $sdp, $match) === 0){
 			return null;
 		}
@@ -76,7 +85,7 @@ final class ClientIdentityAssertion{
 		}
 		self::checkIdentityProvider($data["idp"] ?? null);
 
-		[$claims, $publicKeyBase64] = self::extractTokenClaims($assertion["token"]);
+		[$claims, $publicKeyBase64] = self::extractTokenClaims($assertion["token"], $trust);
 
 		return new self($assertion["fingerprints"], $assertion["token"], $publicKeyBase64, $claims);
 	}
@@ -100,7 +109,7 @@ final class ClientIdentityAssertion{
 	 * @return array{array, string} claims and the base64 encoded 'cpk' public key
 	 * @throws IdentityException
 	 */
-	private static function extractTokenClaims(string $token) : array{
+	private static function extractTokenClaims(string $token, TokenTrust $trust) : array{
 		$parts = explode(".", $token);
 		$header = json_decode(JwsEs384::base64UrlDecode($parts[0]) ?? "", true);
 		if(!is_array($header)){
@@ -110,6 +119,9 @@ final class ClientIdentityAssertion{
 		$algorithm = $header["alg"] ?? null;
 		if($algorithm !== "ES384" && $algorithm !== "RS256"){
 			throw new IdentityException("Identity token uses an unsupported algorithm");
+		}
+		if($trust === TokenTrust::MINECRAFT_AUTH && $algorithm !== "RS256"){
+			throw new IdentityException("Identity token was signed by the peer itself, not by the authorization service");
 		}
 		$payload = JwsEs384::base64UrlDecode($parts[1]);
 		if($payload === null){
@@ -125,6 +137,9 @@ final class ClientIdentityAssertion{
 		if(isset($claims["nbf"]) && is_int($claims["nbf"]) && $claims["nbf"] > time() + 60){
 			throw new IdentityException("Identity token is not yet valid");
 		}
+		if($trust === TokenTrust::MINECRAFT_AUTH){
+			self::checkIssuedToken($claims);
+		}
 		//the claim is either a base64 encoded PKIX key or a JSON Web Key object
 		$publicKey = is_string($claims["cpk"]) ? $claims["cpk"] : JwkPublicKey::toBase64Der($claims["cpk"]);
 		if($algorithm === "ES384"){
@@ -134,6 +149,26 @@ final class ClientIdentityAssertion{
 			self::verifySelfSignature($parts, $publicKey);
 		}
 		return [$claims, $publicKey];
+	}
+
+	/**
+	 * The signature of an issued token can only be checked against the issuer's keys, which the
+	 * transport does not hold - the login layer does, and it rejects a chain that fails there. What
+	 * is worth refusing this early is a token that never claimed to come from the service: it costs
+	 * nothing to spot, and it is the shape a peer forges when it wants to pick its own name.
+	 *
+	 * @param mixed[] $claims
+	 *
+	 * @throws IdentityException
+	 */
+	private static function checkIssuedToken(array $claims) : void{
+		if(!isset($claims["exp"]) || !is_int($claims["exp"])){
+			throw new IdentityException("Identity token has no expiry");
+		}
+		$issuer = $claims["iss"] ?? null;
+		if(!is_string($issuer) || rtrim($issuer, "/") !== self::AUTH_ISSUER){
+			throw new IdentityException("Identity token was not issued by the authorization service");
+		}
 	}
 
 	/**

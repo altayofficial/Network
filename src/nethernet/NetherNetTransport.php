@@ -28,7 +28,7 @@ namespace altay\network\nethernet;
 use altay\network\nethernet\discovery\AddressBook;
 use altay\network\nethernet\endpoint\EndpointClient;
 use altay\network\nethernet\endpoint\EndpointHandler;
-use altay\network\nethernet\endpoint\PlaintextSignallingServer;
+use altay\network\nethernet\endpoint\SignallingServer;
 use altay\network\nethernet\discovery\DiscoveryCodec;
 use altay\network\nethernet\discovery\DiscoveryMessagePacket;
 use altay\network\nethernet\discovery\DiscoveryRequestPacket;
@@ -36,7 +36,10 @@ use altay\network\nethernet\discovery\DiscoveryResponsePacket;
 use altay\network\nethernet\auth\ClientIdentityAssertion;
 use altay\network\nethernet\auth\IdentityException;
 use altay\network\nethernet\auth\ServerIdentity;
+use altay\network\nethernet\auth\TokenTrust;
+use altay\network\nethernet\sdp\AdvertisedAddresses;
 use altay\network\nethernet\sdp\AnswerRewriter;
+use altay\network\nethernet\sdp\CandidateInference;
 use altay\network\nethernet\sdp\IceCandidate;
 use altay\network\nethernet\sdp\SessionDescription;
 use altay\network\nethernet\types\SignalErrorCode;
@@ -116,8 +119,14 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	private array $sessions = [];
 
 	private AddressBook $addressBook;
+	private AdvertisedAddresses $advertised;
 	private int $lastMaintenance = 0;
 
+	/**
+	 * @param string[] $iceInterfaces
+	 * @param string[] $advertisedAddresses
+	 * @param array{int, int}|null $icePortRange
+	 */
 	public function __construct(
 		private \Logger $logger,
 		private int $networkId,
@@ -131,10 +140,17 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		private string $identityDomain = "self",
 		private bool $relayOnly = false,
 		private bool $requireEndpointIdentity = false,
-		/** @var string[] */
-		private array $iceInterfaces = []
+		private array $iceInterfaces = [],
+		array $advertisedAddresses = [],
+		private ?array $icePortRange = null,
+		private ?string $tlsCertificatePath = null,
+		private ?string $tlsKeyPath = null,
+		private TokenTrust $tokenTrust = TokenTrust::ANY,
+		private ?TokenTrust $endpointTokenTrust = null,
+		private bool $inferPeerCandidates = true
 	){
 		$this->addressBook = new AddressBook();
+		$this->advertised = new AdvertisedAddresses($advertisedAddresses);
 	}
 
 	/**
@@ -287,8 +303,36 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		$server->on("error", function(\Throwable $e) : void{
 			$this->logger->debug("Endpoint signalling error: " . $e->getMessage());
 		});
-		$server->listen(new PlaintextSignallingServer($socket));
+		$server->listen(new SignallingServer($socket, $this->tlsContext()));
 		$this->endpointSocket = $socket;
+	}
+
+	/**
+	 * The certificate the endpoint serves TLS with, if it was given one. Clients open with a
+	 * handshake either way, so this only decides whether that handshake gets an answer or has to
+	 * fall back to plaintext.
+	 *
+	 * @return mixed[]
+	 */
+	private function tlsContext() : array{
+		if($this->tlsCertificatePath === null){
+			return [];
+		}
+		if(!is_file($this->tlsCertificatePath)){
+			$this->logger->warning("Cannot serve HTTPS signalling: no certificate at $this->tlsCertificatePath");
+			$this->logger->warning("Clients will fall back to plaintext on the same port.");
+			return [];
+		}
+		$context = ["local_cert" => $this->tlsCertificatePath];
+		if($this->tlsKeyPath !== null){
+			if(!is_file($this->tlsKeyPath)){
+				$this->logger->warning("Cannot serve HTTPS signalling: no private key at $this->tlsKeyPath");
+				return [];
+			}
+			$context["local_pk"] = $this->tlsKeyPath;
+		}
+		$this->logger->info("Serving HTTPS signalling with the certificate at $this->tlsCertificatePath");
+		return $context;
 	}
 
 	public function tick() : void{
@@ -640,10 +684,21 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	}
 
 	/**
-	 * @param bool|null $requireIdentity overrides the policy the transport was configured with, for
-	 *                                   signalling channels that hold their peers to a different one
+	 * Who the signalling endpoint trusts to have issued the token in an offer. A player who reaches
+	 * the server through it is signed in, so a server that authenticates its players can insist on
+	 * a token the authorization service issued - one a peer signed for itself proves nothing but
+	 * that it holds a key it made up.
 	 */
-	public function acceptOffer(Signal $signal, int $senderNetworkId, string $address, int $port, SignalSink $sink, ?bool $requireIdentity = null) : void{
+	public function endpointTokenTrust() : TokenTrust{
+		return $this->endpointTokenTrust ?? $this->tokenTrust;
+	}
+
+	/**
+	 * @param bool|null       $requireIdentity overrides the policy the transport was configured with, for
+	 *                                         signalling channels that hold their peers to a different one
+	 * @param TokenTrust|null $trust           likewise for who the token has to have come from
+	 */
+	public function acceptOffer(Signal $signal, int $senderNetworkId, string $address, int $port, SignalSink $sink, ?bool $requireIdentity = null, ?TokenTrust $trust = null) : void{
 		$connectionId = $signal->connectionId;
 		try{
 			$sessionId = Uint64::toSignedInt($connectionId);
@@ -678,7 +733,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		}
 
 		try{
-			$assertion = ClientIdentityAssertion::fromSdp($signal->data);
+			$assertion = ClientIdentityAssertion::fromSdp($signal->data, $trust ?? $this->tokenTrust);
 			$assertion?->verify($signal->data);
 		}catch(IdentityException $e){
 			$this->logger->info("Rejecting connection $connectionId from $address:$port: invalid identity assertion: " . $e->getMessage());
@@ -734,8 +789,9 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 
 		$offer = $signal->data;
 		$connection->setRemoteDescription(new RTCSessionDescription($offer, "offer"))
-			->then(function() use ($connection, $offer, $connectionId) : void{
+			->then(function() use ($connection, $offer, $connectionId, $address) : void{
 				$this->addOfferedCandidates($connection, $offer, $connectionId);
+				$this->addInferredCandidates($connection, $offer, $connectionId, $address);
 			})
 			->then(fn() => $connection->createAnswer())
 			->then(fn(RTCSessionDescription $answer) => $connection->setLocalDescription($answer))
@@ -757,6 +813,22 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			}
 			if($this->addCandidate($connection, $candidate, $connectionId)){
 				$added++;
+			}
+		}
+	}
+
+	/**
+	 * Adds the candidates a peer would have offered if it had a way to learn its own public address.
+	 * A client behind NAT that only ever gathered host candidates has none, and its checks stop at
+	 * the first NAT between the two, so the only path left is the one its signalling came over.
+	 */
+	private function addInferredCandidates(RTCPeerConnection $connection, string $sdp, string $connectionId, string $address) : void{
+		if(!$this->inferPeerCandidates || $address === ""){
+			return;
+		}
+		foreach(CandidateInference::reflexiveFor($sdp, $address) as $candidate){
+			if($this->addCandidate($connection, $candidate, $connectionId)){
+				$this->logger->debug("Guessing $address:" . $candidate->port . " for connection $connectionId, its offer carries no reachable candidate");
 			}
 		}
 	}
@@ -1072,6 +1144,17 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		if($interfaces !== []){
 			$configuration->iceSettings()->setInterfaces($interfaces);
 		}
+		//a player's media leaves from a port of its own, and by default that is whatever the system
+		//hands out, which cannot be forwarded through a firewall. Naming a range keeps it to ports
+		//the operator has opened
+		if($this->icePortRange !== null){
+			try{
+				$configuration->iceSettings()->setIcePortRange($this->icePortRange[0], $this->icePortRange[1]);
+			}catch(\Throwable $e){
+				$this->logger->warning("Ignoring the configured NetherNet port range: " . $e->getMessage());
+				$this->icePortRange = null;
+			}
+		}
 		return new RTCPeerConnection($configuration);
 	}
 
@@ -1166,6 +1249,11 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 				return;
 			}
 			$sdp = AnswerRewriter::conform($local->getSdp());
+			//a peer that gets its candidates trickled found this server on the local network, where
+			//the addresses an operator advertises to the internet are not the ones that reach it
+			if(!$sink->supportsTrickle()){
+				$sdp = $this->advertised->filter($sdp, $this->logger);
+			}
 			$description = $this->withIdentityAttribute($sdp);
 			//kept so a repeated offer can be answered, and a lost offer repeated, without renegotiating
 			if(isset($this->pending[$connectionId])){

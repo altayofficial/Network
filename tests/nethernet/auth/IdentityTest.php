@@ -8,10 +8,13 @@ use altay\network\nethernet\auth\ClientIdentityAssertion;
 use altay\network\nethernet\auth\IdentityException;
 use altay\network\nethernet\auth\JwsEs384;
 use altay\network\nethernet\auth\ServerIdentity;
+use altay\network\nethernet\auth\TokenTrust;
 use altay\network\nethernet\auth\SdpFingerprints;
 use PHPUnit\Framework\TestCase;
 
 final class IdentityTest extends TestCase{
+
+	private const AUTH_ISSUER = "https://authorization.franchise.minecraft-services.net/";
 
 	private const SDP_TEMPLATE = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=fingerprint:sha-256 %s\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n";
 
@@ -47,12 +50,21 @@ final class IdentityTest extends TestCase{
 
 	/**
 	 * @param array<string, mixed>|null $idp
+	 * @param array<string, mixed> $extraClaims claims to add to the token; a null value leaves one out
 	 */
-	private function buildClientOffer(string $fingerprint, ?int $exp = null, ?array $idp = ["domain" => "test", "protocol" => "default"], mixed $cpk = null, ?\OpenSSLAsymmetricKey $tokenKey = null, string $algorithm = "ES384") : string{
+	private function buildClientOffer(string $fingerprint, ?int $exp = null, ?array $idp = ["domain" => "test", "protocol" => "default"], mixed $cpk = null, ?\OpenSSLAsymmetricKey $tokenKey = null, string $algorithm = "ES384", array $extraClaims = []) : string{
 		$b64u = fn(string $d) => JwsEs384::base64UrlEncode($d);
 		$header = $b64u(json_encode(["alg" => "ES384"]));
 		$tokenHeader = $b64u(json_encode(["alg" => $algorithm]));
-		$claims = $b64u(json_encode(["cpk" => $cpk ?? $this->clientPublicKey, "exp" => $exp ?? time() + 300]));
+		$claimValues = ["cpk" => $cpk ?? $this->clientPublicKey, "exp" => $exp ?? time() + 300];
+		foreach($extraClaims as $name => $value){
+			if($value === null){
+				unset($claimValues[$name]);
+			}else{
+				$claimValues[$name] = $value;
+			}
+		}
+		$claims = $b64u(json_encode($claimValues));
 		$token = "$tokenHeader.$claims." . $b64u(JwsEs384::sign("$tokenHeader.$claims", $tokenKey ?? $this->clientKey));
 
 		$sdp = $this->sdp($fingerprint);
@@ -155,6 +167,52 @@ final class IdentityTest extends TestCase{
 		$assertion = ClientIdentityAssertion::fromSdp($offer);
 		self::assertNotNull($assertion);
 		$assertion->verify($offer);
+	}
+
+	/**
+	 * @param array<string, mixed> $extraClaims
+	 */
+	private function issuedOffer(array $extraClaims = ["iss" => self::AUTH_ISSUER]) : string{
+		return $this->buildClientOffer($this->fingerprint("cert"), null, ["domain" => "test", "protocol" => "default"], null, null, "RS256", $extraClaims);
+	}
+
+	public function testMinecraftAuthAcceptsATokenTheServiceIssued() : void{
+		$offer = $this->issuedOffer();
+		$assertion = ClientIdentityAssertion::fromSdp($offer, TokenTrust::MINECRAFT_AUTH);
+
+		self::assertNotNull($assertion);
+		$assertion->verify($offer);
+	}
+
+	public function testMinecraftAuthAcceptsTheIssuerWithoutItsTrailingSlash() : void{
+		self::assertNotNull(ClientIdentityAssertion::fromSdp(
+			$this->issuedOffer(["iss" => rtrim(self::AUTH_ISSUER, "/")]),
+			TokenTrust::MINECRAFT_AUTH
+		));
+	}
+
+	public function testMinecraftAuthRejectsATokenThePeerSignedItself() : void{
+		$this->expectException(IdentityException::class);
+		ClientIdentityAssertion::fromSdp($this->buildClientOffer($this->fingerprint("cert")), TokenTrust::MINECRAFT_AUTH);
+	}
+
+	public function testMinecraftAuthRejectsAnotherIssuer() : void{
+		$this->expectException(IdentityException::class);
+		ClientIdentityAssertion::fromSdp($this->issuedOffer(["iss" => "https://example.com/"]), TokenTrust::MINECRAFT_AUTH);
+	}
+
+	public function testMinecraftAuthRejectsATokenWithNoIssuer() : void{
+		$this->expectException(IdentityException::class);
+		ClientIdentityAssertion::fromSdp($this->issuedOffer([]), TokenTrust::MINECRAFT_AUTH);
+	}
+
+	public function testMinecraftAuthRejectsATokenThatNeverExpires() : void{
+		$this->expectException(IdentityException::class);
+		ClientIdentityAssertion::fromSdp($this->issuedOffer(["iss" => self::AUTH_ISSUER, "exp" => null]), TokenTrust::MINECRAFT_AUTH);
+	}
+
+	public function testAnyTakesATokenThePeerSignedItself() : void{
+		self::assertNotNull(ClientIdentityAssertion::fromSdp($this->buildClientOffer($this->fingerprint("cert")), TokenTrust::ANY));
 	}
 
 	public function testServerIdentityRoundTrip() : void{
