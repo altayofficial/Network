@@ -570,10 +570,10 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		if($this->isBlocked($address)){
 			return;
 		}
-		$result = DiscoveryCodec::unmarshal($buffer);
+		$result = DiscoveryCodec::unmarshal($buffer, $reason);
 		if($result === null){
 			$hexPrefix = bin2hex(substr($buffer, 0, 16));
-			$this->logger->debug("Ignoring invalid discovery datagram from $address:$port (" . strlen($buffer) . " bytes, hex prefix $hexPrefix)");
+			$this->logger->debug("Ignoring a datagram from $address:$port, it $reason (" . strlen($buffer) . " bytes, hex prefix $hexPrefix)");
 			return;
 		}
 		[$packet, $senderId] = $result;

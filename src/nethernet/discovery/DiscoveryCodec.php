@@ -59,15 +59,37 @@ final class DiscoveryCodec{
 	}
 
 	/**
+	 * @param string|null $reason set to what the datagram failed on, for a caller that wants to say
+	 *                            so. Which check it is tells whether something is speaking a
+	 *                            different protocol at this port or a peer's message did not survive
+	 *                            the trip.
+	 *
 	 * @return array{DiscoveryPacket, int}|null packet and sender network ID, null if the datagram is not a valid discovery packet
+	 *
+	 * @phpstan-param-out string|null $reason
 	 */
-	public static function unmarshal(string $bytes) : ?array{
+	public static function unmarshal(string $bytes, ?string &$reason = null) : ?array{
+		$reason = null;
 		$ciphertextLength = strlen($bytes) - self::CHECKSUM_LENGTH;
-		if($ciphertextLength <= 0 || $ciphertextLength % self::CIPHER_BLOCK_LENGTH !== 0 || $ciphertextLength > self::MAX_CIPHERTEXT_LENGTH){
+		if($ciphertextLength <= 0){
+			$reason = "shorter than the checksum it should start with";
+			return null;
+		}
+		if($ciphertextLength % self::CIPHER_BLOCK_LENGTH !== 0){
+			$reason = "the body is not a whole number of cipher blocks, so it was never encrypted with ours";
+			return null;
+		}
+		if($ciphertextLength > self::MAX_CIPHERTEXT_LENGTH){
+			$reason = "larger than any discovery message";
 			return null;
 		}
 		$payload = DiscoveryCrypto::decrypt(substr($bytes, self::CHECKSUM_LENGTH));
-		if($payload === null || !hash_equals(DiscoveryCrypto::checksum($payload), substr($bytes, 0, self::CHECKSUM_LENGTH))){
+		if($payload === null){
+			$reason = "will not decrypt, which is what foreign traffic on this port looks like";
+			return null;
+		}
+		if(!hash_equals(DiscoveryCrypto::checksum($payload), substr($bytes, 0, self::CHECKSUM_LENGTH))){
+			$reason = "decrypted but the checksum does not match, so the sender signs differently";
 			return null;
 		}
 
@@ -86,13 +108,16 @@ final class DiscoveryCodec{
 				default => null
 			};
 			if($packet === null){
+				$reason = "carries an unknown packet ID $packetId";
 				return null;
 			}
 			$packet->decodePayload($in);
 			if(!$in->feof()){
+				$reason = "has bytes left over after the packet";
 				return null;
 			}
-		}catch(BinaryDataException | \InvalidArgumentException){
+		}catch(BinaryDataException | \InvalidArgumentException $e){
+			$reason = "is malformed: " . $e->getMessage();
 			return null;
 		}
 
