@@ -150,7 +150,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		private TokenTrust $tokenTrust = TokenTrust::ANY,
 		private ?TokenTrust $endpointTokenTrust = null,
 		private bool $inferPeerCandidates = true,
-		private bool $verboseWebrtcLogging = false
+		private bool $verboseLogging = false
 	){
 		$this->addressBook = new AddressBook();
 		$this->advertised = new AdvertisedAddresses($advertisedAddresses);
@@ -570,10 +570,15 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		if($this->isBlocked($address)){
 			return;
 		}
-		$result = DiscoveryCodec::unmarshal($buffer, $reason);
+		$result = DiscoveryCodec::unmarshal($buffer, $reason, $payload);
 		if($result === null){
 			$hexPrefix = bin2hex(substr($buffer, 0, 16));
 			$this->logger->debug("Ignoring a datagram from $address:$port, it $reason (" . strlen($buffer) . " bytes, hex prefix $hexPrefix)");
+			if($this->verboseLogging && $payload !== null){
+				//it decrypted, so it is ours in everything but the part we could not read - the whole
+				//of it is what says which part that is
+				$this->logger->debug("The datagram decrypted to: " . bin2hex($payload));
+			}
 			return;
 		}
 		[$packet, $senderId] = $result;
@@ -1163,7 +1168,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		}
 		$connection = new RTCPeerConnection($configuration);
 		//has to happen before the transports are built, they take the logger they are given at birth
-		$connection->setLogger(new WebrtcLogger($this->logger, "Connection $connectionId: ", $this->verboseWebrtcLogging));
+		$connection->setLogger(new WebrtcLogger($this->logger, "Connection $connectionId: ", $this->verboseLogging));
 		return $connection;
 	}
 

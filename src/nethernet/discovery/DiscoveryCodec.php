@@ -73,17 +73,21 @@ final class DiscoveryCodec{
 	}
 
 	/**
-	 * @param string|null $reason set to what the datagram failed on, for a caller that wants to say
-	 *                            so. Which check it is tells whether something is speaking a
-	 *                            different protocol at this port or a peer's message did not survive
-	 *                            the trip.
+	 * @param string|null $reason  set to what the datagram failed on, for a caller that wants to say
+	 *                              so. Which check it is tells whether something is speaking a
+	 *                              different protocol at this port or a peer's message did not
+	 *                              survive the trip.
+	 * @param string|null $payload set to the decrypted payload once there is one, so that a caller
+	 *                              looking at a rejected datagram can see what it held
 	 *
 	 * @return array{DiscoveryPacket, int}|null packet and sender network ID, null if the datagram is not a valid discovery packet
 	 *
 	 * @phpstan-param-out string|null $reason
+	 * @phpstan-param-out string|null $payload
 	 */
-	public static function unmarshal(string $bytes, ?string &$reason = null) : ?array{
+	public static function unmarshal(string $bytes, ?string &$reason = null, ?string &$payload = null) : ?array{
 		$reason = null;
+		$payload = null;
 		$ciphertextLength = strlen($bytes) - self::CHECKSUM_LENGTH;
 		if($ciphertextLength <= 0){
 			$reason = "shorter than the checksum it should start with";
