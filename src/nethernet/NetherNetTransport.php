@@ -106,6 +106,9 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	 */
 	private const GATHERING_TIMEOUT = 5;
 
+	/** How long a gap between two ticks has to be before it is worth reporting, in seconds */
+	private const STALL_THRESHOLD = 0.1;
+
 	private ?\Socket $socket = null;
 	private ?SocketServer $endpointSocket = null;
 	private ?TransportListener $listener = null;
@@ -119,6 +122,8 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	private array $pending = [];
 	/** @var NetherNetSession[] */
 	private array $sessions = [];
+
+	private ?float $lastTickAt = null;
 
 	private AddressBook $addressBook;
 	private AdvertisedAddresses $advertised;
@@ -341,6 +346,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		if(!$this->running){
 			return;
 		}
+		$this->reportStall();
 		while($this->socket !== null){
 			$buffer = "";
 			$address = "";
@@ -456,6 +462,23 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		}
 		if(($sent !== 0 || $received !== 0) && $this->listener !== null){
 			$this->listener->onBandwidthUpdate($this, $sent, $received);
+		}
+	}
+
+	/**
+	 * Says so when the transport did not get to run for a while.
+	 *
+	 * Everything here is driven from this one call: the discovery socket is read in it, the peer
+	 * connections' timers fire in it, and packets from the server go out through it. A gap means
+	 * none of that happened, which from the outside looks like a network that lost the packets - so
+	 * it is worth being able to tell the two apart.
+	 */
+	private function reportStall() : void{
+		$now = microtime(true);
+		$previous = $this->lastTickAt;
+		$this->lastTickAt = $now;
+		if($previous !== null && ($now - $previous) > self::STALL_THRESHOLD){
+			$this->logger->debug("The transport did not run for " . round(($now - $previous) * 1000) . "ms");
 		}
 	}
 
