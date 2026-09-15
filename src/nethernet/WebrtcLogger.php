@@ -35,19 +35,36 @@ use function strtr;
  *
  * Those layers know why a connection went away - a consent check that stopped being answered, an
  * association the peer aborted, a handshake that never finished - and without this every one of
- * those reads as nothing more than "the connection closed".
+ * those reads as nothing more than "the connection closed". What they have to say below a warning
+ * is a running commentary on every datagram, so it is kept out of the way unless it is asked for.
  */
 final class WebrtcLogger extends AbstractLogger{
 
+	private const IMPORTANT = [
+		LogLevel::EMERGENCY => true,
+		LogLevel::ALERT => true,
+		LogLevel::CRITICAL => true,
+		LogLevel::ERROR => true,
+		LogLevel::WARNING => true
+	];
+
+	/**
+	 * @param bool $verbose whether to pass on the per-message chatter as well, which is only worth
+	 *                      having when a connection is being taken apart to find out why it failed
+	 */
 	public function __construct(
 		private \Logger $logger,
-		private string $prefix = ""
+		private string $prefix = "",
+		private bool $verbose = false
 	){}
 
 	/**
 	 * @param mixed[] $context
 	 */
 	public function log(mixed $level, string|\Stringable $message, array $context = []) : void{
+		if(!$this->verbose && !isset(self::IMPORTANT[$level])){
+			return;
+		}
 		$text = $this->prefix . self::interpolate((string) $message, $context);
 		match($level){
 			LogLevel::EMERGENCY => $this->logger->emergency($text),

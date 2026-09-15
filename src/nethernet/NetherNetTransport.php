@@ -147,7 +147,8 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		private ?string $tlsKeyPath = null,
 		private TokenTrust $tokenTrust = TokenTrust::ANY,
 		private ?TokenTrust $endpointTokenTrust = null,
-		private bool $inferPeerCandidates = true
+		private bool $inferPeerCandidates = true,
+		private bool $verboseWebrtcLogging = false
 	){
 		$this->addressBook = new AddressBook();
 		$this->advertised = new AdvertisedAddresses($advertisedAddresses);
@@ -1173,7 +1174,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		}
 		$connection = new RTCPeerConnection($configuration);
 		//has to happen before the transports are built, they take the logger they are given at birth
-		$connection->setLogger(new WebrtcLogger($this->logger, "Connection $connectionId: "));
+		$connection->setLogger(new WebrtcLogger($this->logger, "Connection $connectionId: ", $this->verboseWebrtcLogging));
 		return $connection;
 	}
 
