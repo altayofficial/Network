@@ -81,16 +81,21 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 
 	/**
 	 * Negotiating a connection costs a DTLS handshake and an ICE agent, and nothing about an offer is
-	 * authenticated, so both the total and the per-peer rate have to be capped or an anonymous peer
-	 * can keep the transport thread busy enough to starve the players already on the server.
+	 * authenticated, so what one peer may have in flight has to be capped, or an anonymous peer can
+	 * keep the transport thread busy enough to starve the players already on the server.
+	 *
+	 * What is capped is the negotiations an address holds open at once, not how many it may start.
+	 * A join is over in a fraction of a second, so a household, a school or a mobile carrier - all of
+	 * which put many players behind one address - never stack up more than a handful, while a peer
+	 * that opens negotiations and abandons them is stopped at the point where it starts costing
+	 * something.
 	 */
 	private const MAX_PENDING_NEGOTIATIONS = 64;
-	private const MAX_OFFERS_PER_ADDRESS = 8;
-	private const OFFER_RATE_WINDOW = 10;
+	private const MAX_NEGOTIATIONS_PER_ADDRESS = 32;
 	private const MAX_REMOTE_CANDIDATES = 32;
 
 	private int $maxPendingNegotiations = self::MAX_PENDING_NEGOTIATIONS;
-	private int $maxOffersPerAddress = self::MAX_OFFERS_PER_ADDRESS;
+	private int $maxNegotiationsPerAddress = self::MAX_NEGOTIATIONS_PER_ADDRESS;
 
 	private const ENDPOINT_MAX_CONCURRENT_REQUESTS = 64;
 
@@ -110,9 +115,6 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	private ?string $discoveryResponse = null;
 	/** @var array<string, int> address => unix time the block expires */
 	private array $blockedAddresses = [];
-	/** @var array<string, array{count: int, since: int}> address => offers seen in the current window */
-	private array $offerRates = [];
-
 	/** @var array<string, array{connection: RTCPeerConnection, networkId: int, address: string, port: int, publicKey: ?string, createdAt: int, outgoing: bool, sink: SignalSink, offer: ?string, answer: ?string, lastSignalAt: float}> */
 	private array $pending = [];
 	/** @var NetherNetSession[] */
@@ -155,16 +157,15 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	}
 
 	/**
-	 * Raises or lowers what an unauthenticated peer may ask of the transport. The defaults suit a
-	 * server whose players each come from their own address; several players behind one address, or
-	 * a benchmark dialling from a single host, need the per address allowance raised.
+	 * Raises or lowers what an unauthenticated peer may ask of the transport: how many negotiations
+	 * may be in flight in total, and how many of those one address may hold.
 	 */
-	public function setNegotiationLimits(int $maxPendingNegotiations, int $maxOffersPerAddress) : void{
-		if($maxPendingNegotiations < 1 || $maxOffersPerAddress < 1){
+	public function setNegotiationLimits(int $maxPendingNegotiations, int $maxNegotiationsPerAddress) : void{
+		if($maxPendingNegotiations < 1 || $maxNegotiationsPerAddress < 1){
 			throw new \InvalidArgumentException("Negotiation limits must be positive");
 		}
 		$this->maxPendingNegotiations = $maxPendingNegotiations;
-		$this->maxOffersPerAddress = $maxOffersPerAddress;
+		$this->maxNegotiationsPerAddress = $maxNegotiationsPerAddress;
 	}
 
 	public function setCredentials(?Credentials $credentials) : void{
@@ -420,11 +421,6 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	 * a remote trigger.
 	 */
 	private function expireRateLimits(int $now) : void{
-		foreach($this->offerRates as $address => $entry){
-			if($now - $entry["since"] >= self::OFFER_RATE_WINDOW){
-				unset($this->offerRates[$address]);
-			}
-		}
 		foreach($this->blockedAddresses as $address => $until){
 			if($until <= $now){
 				unset($this->blockedAddresses[$address]);
@@ -557,24 +553,17 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	}
 
 	/**
-	 * Offers are unauthenticated and each one costs a peer connection, so a peer that asks for more
-	 * than its share within the window is turned away until the window rolls over.
+	 * How many negotiations an address has open. A finished one is gone from here the moment its
+	 * session opens, and an abandoned one when it times out.
 	 */
-	private function withinOfferRate(string $address) : bool{
-		if($address === ""){
-			return true;
+	private function negotiationsFrom(string $address) : int{
+		$count = 0;
+		foreach($this->pending as $entry){
+			if($entry["address"] === $address){
+				$count++;
+			}
 		}
-		$now = time();
-		$entry = $this->offerRates[$address] ?? null;
-		if($entry === null || $now - $entry["since"] >= self::OFFER_RATE_WINDOW){
-			$this->offerRates[$address] = ["count" => 1, "since" => $now];
-			return true;
-		}
-		if($entry["count"] >= $this->maxOffersPerAddress){
-			return false;
-		}
-		$this->offerRates[$address]["count"]++;
-		return true;
+		return $count;
 	}
 
 	private function handleDatagram(string $buffer, string $address, int $port) : void{
@@ -727,8 +716,8 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			$sink->write(self::errorSignal($connectionId, SignalErrorCode::FAILED_TO_CREATE_PEER_CONNECTION));
 			return;
 		}
-		if(!$this->withinOfferRate($address)){
-			$this->logger->debug("Rejecting connection $connectionId from $address:$port: more than $this->maxOffersPerAddress offers in the last " . self::OFFER_RATE_WINDOW . " seconds");
+		if($address !== "" && $this->negotiationsFrom($address) >= $this->maxNegotiationsPerAddress){
+			$this->logger->debug("Rejecting connection $connectionId from $address:$port: $address already has $this->maxNegotiationsPerAddress negotiations in flight");
 			$sink->write(self::errorSignal($connectionId, SignalErrorCode::FAILED_TO_CREATE_PEER_CONNECTION));
 			return;
 		}
