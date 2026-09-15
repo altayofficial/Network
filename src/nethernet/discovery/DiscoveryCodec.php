@@ -40,9 +40,23 @@ final class DiscoveryCodec{
 	 * before decrypting, so the cheap length tests are all that keeps junk away from the cipher.
 	 */
 	private const MAX_CIPHERTEXT_LENGTH = 64 * 1024;
+	/** How much of an unaccounted tail is worth putting in a log line */
+	private const PREVIEW_LENGTH = 32;
 
 	private function __construct(){
 
+	}
+
+	/**
+	 * What is left of a payload the parser could not account for, in a form that fits in a log line.
+	 * A protocol that grew a field shows up as readable text or a short run of bytes; something that
+	 * was never ours does not.
+	 */
+	private static function preview(string $bytes) : string{
+		$head = substr($bytes, 0, self::PREVIEW_LENGTH);
+		$printable = preg_replace('/[^\x20-\x7e]/', ".", $head);
+
+		return bin2hex($head) . " (\"" . $printable . "\")" . (strlen($bytes) > self::PREVIEW_LENGTH ? " ..." : "");
 	}
 
 	public static function marshal(DiscoveryPacket $packet, int $senderId) : string{
@@ -113,7 +127,8 @@ final class DiscoveryCodec{
 			}
 			$packet->decodePayload($in);
 			if(!$in->feof()){
-				$reason = "has bytes left over after the packet";
+				$remaining = $in->getRemaining();
+				$reason = "has " . strlen($remaining) . " bytes left over after packet $packetId: " . self::preview($remaining);
 				return null;
 			}
 		}catch(BinaryDataException | \InvalidArgumentException $e){

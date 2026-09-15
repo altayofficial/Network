@@ -33,7 +33,6 @@ use function inet_pton;
 use function ltrim;
 use function ord;
 use function preg_split;
-use function str_ends_with;
 use function str_repeat;
 use function str_starts_with;
 use function strlen;
@@ -112,8 +111,12 @@ final class IceCandidate{
 	 * Private ranges have to stay allowed, they are what a LAN connection runs over, but loopback,
 	 * link-local, multicast and the reserved ranges never belong to a remote peer - and since the
 	 * peer that offered the candidate is not authenticated, accepting those would turn the server
-	 * into a probe aimed at whatever listens on them. Hostnames are left to the ICE agent, which
-	 * resolves mDNS candidates itself.
+	 * into a probe aimed at whatever listens on them.
+	 *
+	 * A name rather than an address is refused as well. In practice that is an mDNS candidate, which
+	 * a client sends to keep its local addresses to itself; resolving one means a multicast question
+	 * nobody may answer, and the server does not need the answer anyway - the peer drives the checks,
+	 * and the address its own check arrives from is the one worth talking back to.
 	 */
 	public function hasConnectableAddress() : bool{
 		if($this->port < 1 || $this->port > 65535){
@@ -121,7 +124,7 @@ final class IceCandidate{
 		}
 		$packed = @inet_pton($this->address);
 		if($packed === false){
-			return str_ends_with(strtolower($this->address), ".local");
+			return false;
 		}
 		//the ranges PHP itself calls reserved move between versions, so they are spelled out here
 		return strlen($packed) === 4 ? self::isConnectableV4($packed) : self::isConnectableV6($packed);

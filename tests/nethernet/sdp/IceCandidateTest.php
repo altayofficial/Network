@@ -116,7 +116,7 @@ final class IceCandidateTest extends TestCase{
 			"lan" => ["192.168.1.5", true],
 			"public" => ["8.8.8.8", true],
 			"public v6" => ["2001:db8::1", true],
-			"mdns" => ["8bf1d2a0.local", true],
+			"mdns" => ["8bf1d2a0.local", false],
 			"loopback" => ["127.0.0.1", false],
 			"loopback v6" => ["::1", false],
 			"link local" => ["169.254.1.2", false],
