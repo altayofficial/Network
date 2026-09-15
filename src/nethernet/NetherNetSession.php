@@ -239,9 +239,17 @@ final class NetherNetSession implements TransportSession{
 		}
 	}
 
+	/**
+	 * Reports why the session is going away before tearing the connection down. Closing the peer
+	 * connection first would fire its own state change, and that reaches the transport as a plain
+	 * "the connection closed" - which is true, but says nothing about what actually happened.
+	 */
 	private function closeWithError(string $reason) : void{
-		$this->disconnect();
+		if(!$this->connected){
+			return;
+		}
 		($this->closeHandler)($reason);
+		$this->disconnect();
 	}
 
 	public function sendPacket(string $payload, bool $immediate = false, ?int $receiptId = null) : void{

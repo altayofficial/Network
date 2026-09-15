@@ -752,7 +752,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		}
 
 		try{
-			$connection = $this->createPeerConnection();
+			$connection = $this->createPeerConnection($connectionId);
 		}catch(\Throwable $e){
 			$this->logger->error("Failed to create peer connection: " . $e->getMessage());
 			$sink->write(self::errorSignal($connectionId, SignalErrorCode::FAILED_TO_CREATE_PEER_CONNECTION));
@@ -781,10 +781,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		//peer that goes away mid-handshake, or whose ICE later fails, would sit around until the
 		//pending negotiation times out - and an established session would never be torn down at all
 		$connection->on("connectionstatechange", function() use ($connection, $connectionId) : void{
-			$state = $connection->getConnectionState();
-			if($state === ConnectionState::failed || $state === ConnectionState::closed){
-				$this->dropConnection($connectionId, "peer connection " . $state->name);
-			}
+			$this->handleConnectionStateChange($connection, $connectionId);
 		});
 
 		$offer = $signal->data;
@@ -942,10 +939,32 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		}
 	}
 
+	/**
+	 * A connection that ends on its own says so here. One this server closed says it too, but by
+	 * then the session is either already gone or on its way out with a reason of its own, and
+	 * reporting this one over it would bury what actually happened.
+	 */
+	private function handleConnectionStateChange(RTCPeerConnection $connection, string $connectionId) : void{
+		$state = $connection->getConnectionState();
+		if($state !== ConnectionState::failed && $state !== ConnectionState::closed){
+			return;
+		}
+		try{
+			$session = $this->sessions[Uint64::toSignedInt($connectionId)] ?? null;
+		}catch(\InvalidArgumentException){
+			$session = null;
+		}
+		if($session !== null && !$session->isConnected()){
+			return;
+		}
+		$this->dropConnection($connectionId, "peer connection " . $state->name);
+	}
+
 	private function closeSession(int $sessionId, string $reason) : void{
 		$session = $this->sessions[$sessionId] ?? null;
 		if($session !== null){
 			unset($this->sessions[$sessionId]);
+			$this->logger->debug("Session $sessionId from " . $session->getAddress() . ":" . $session->getPort() . " closed after " . (time() - $session->getCreatedAt()) . "s: $reason");
 			$session->disconnect();
 			$this->listener?->onSessionClose($this, $session, $reason);
 		}
@@ -1031,7 +1050,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		$sessionId = Uint64::toSignedInt($connectionId);
 
 		try{
-			$connection = $this->createPeerConnection();
+			$connection = $this->createPeerConnection($connectionId);
 		}catch(\Throwable $e){
 			throw new TransportException("Failed to create peer connection: " . $e->getMessage(), 0, $e);
 		}
@@ -1051,10 +1070,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			"lastSignalAt" => microtime(true)
 		];
 		$connection->on("connectionstatechange", function() use ($connection, $connectionId) : void{
-			$state = $connection->getConnectionState();
-			if($state === ConnectionState::failed || $state === ConnectionState::closed){
-				$this->dropConnection($connectionId, "peer connection " . $state->name);
-			}
+			$this->handleConnectionStateChange($connection, $connectionId);
 		});
 
 		$session = $this->openSession($connection, $connectionId, $sessionId, $address, $port);
@@ -1124,7 +1140,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			});
 	}
 
-	private function createPeerConnection() : RTCPeerConnection{
+	private function createPeerConnection(string $connectionId) : RTCPeerConnection{
 		if($this->credentials !== null && $this->credentials->isExpired()){
 			$this->logger->debug("Discarding expired NetherNet credentials");
 			$this->credentials = null;
@@ -1155,7 +1171,10 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 				$this->icePortRange = null;
 			}
 		}
-		return new RTCPeerConnection($configuration);
+		$connection = new RTCPeerConnection($configuration);
+		//has to happen before the transports are built, they take the logger they are given at birth
+		$connection->setLogger(new WebrtcLogger($this->logger, "Connection $connectionId: "));
+		return $connection;
 	}
 
 	/**
