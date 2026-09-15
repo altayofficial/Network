@@ -217,16 +217,16 @@
         },
         {
             "name": "altayofficial/webrtc",
-            "version": "1.2.0",
+            "version": "1.6.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/altayofficial/webrtc.git",
-                "reference": "7ec335e376e853d38b9c5efd69997d50b01559de"
+                "reference": "e9ae8eb3dd58b13532589328728fd2c1a7847d49"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/altayofficial/webrtc/zipball/7ec335e376e853d38b9c5efd69997d50b01559de",
-                "reference": "7ec335e376e853d38b9c5efd69997d50b01559de",
+                "url": "https://api.github.com/repos/altayofficial/webrtc/zipball/e9ae8eb3dd58b13532589328728fd2c1a7847d49",
+                "reference": "e9ae8eb3dd58b13532589328728fd2c1a7847d49",
                 "shasum": ""
             },
             "require": {
@@ -287,10 +287,10 @@
             ],
             "description": "A WebRTC library designed special for Altay family",
             "support": {
-                "source": "https://github.com/altayofficial/webrtc/tree/1.2.0",
+                "source": "https://github.com/altayofficial/webrtc/tree/1.6.0",
                 "issues": "https://github.com/altayofficial/webrtc/issues"
             },
-            "time": "2026-08-19T10:21:44+00:00"
+            "time": "2026-09-08T19:05:38+00:00"
         },
         {
             "name": "brick/math",
