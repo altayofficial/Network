@@ -1190,8 +1190,12 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			}
 		}
 		$connection = new RTCPeerConnection($configuration);
-		//has to happen before the transports are built, they take the logger they are given at birth
-		$connection->setLogger(new WebrtcLogger($this->logger, "Connection $connectionId: ", $this->verboseLogging));
+		//the layers below check whether they have a logger before they build a line, and building one
+		//per datagram is not free, so a connection nobody is watching is given none at all. This has
+		//to happen before the transports are built, they take the logger they are given at birth
+		if($this->verboseLogging){
+			$connection->setLogger(new WebrtcLogger($this->logger, "Connection $connectionId: "));
+		}
 		return $connection;
 	}
 
