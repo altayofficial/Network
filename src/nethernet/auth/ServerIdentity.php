@@ -25,6 +25,8 @@ declare(strict_types=1);
 
 namespace altay\network\nethernet\auth;
 
+use altay\dtls\OpenSslConfig;
+
 final class ServerIdentity{
 
 	private const TOKEN_LIFETIME = 60;
@@ -36,10 +38,7 @@ final class ServerIdentity{
 	){}
 
 	public static function generate(string $domain = "self") : self{
-		$key = openssl_pkey_new([
-			"private_key_type" => OPENSSL_KEYTYPE_EC,
-			"curve_name" => "secp384r1"
-		]);
+		$key = openssl_pkey_new(["ec" => ["curve_name" => "secp384r1"]]);
 		if($key === false){
 			throw new \RuntimeException("Failed to generate identity key: " . openssl_error_string());
 		}
@@ -74,7 +73,7 @@ final class ServerIdentity{
 	 * @throws \RuntimeException
 	 */
 	private function save(string $path) : void{
-		if(!openssl_pkey_export($this->privateKey, $pem)){
+		if(!openssl_pkey_export($this->privateKey, $pem, null, OpenSslConfig::options())){
 			throw new \RuntimeException("Failed to export identity key: " . openssl_error_string());
 		}
 		if(file_put_contents($path, $pem) === false){

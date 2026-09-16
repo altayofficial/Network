@@ -26,6 +26,7 @@ declare(strict_types=1);
 namespace altay\network\nethernet;
 
 use altay\dtls\Certificate;
+use altay\dtls\OpenSslConfig;
 use function chmod;
 use function file_put_contents;
 use function openssl_pkey_export;
@@ -52,7 +53,7 @@ final class DtlsCertificateFiles{
 	 */
 	public static function generate() : self{
 		$certificate = Certificate::generate();
-		if(!openssl_pkey_export($certificate->privateKey(), $privateKeyPem)){
+		if(!openssl_pkey_export($certificate->privateKey(), $privateKeyPem, null, OpenSslConfig::options())){
 			throw new \RuntimeException("Failed to export the DTLS private key");
 		}
 
