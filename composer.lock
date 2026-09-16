@@ -215,16 +215,16 @@
     "packages-dev": [
         {
             "name": "altayofficial/dtls",
-            "version": "1.0.0",
+            "version": "1.0.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/altayofficial/dtls.git",
-                "reference": "d95b7788abc8b84e2df7a069e183eb63bf16a48a"
+                "reference": "9313178b05900bb49212e09e37f97b37ffb8de52"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/altayofficial/dtls/zipball/d95b7788abc8b84e2df7a069e183eb63bf16a48a",
-                "reference": "d95b7788abc8b84e2df7a069e183eb63bf16a48a",
+                "url": "https://api.github.com/repos/altayofficial/dtls/zipball/9313178b05900bb49212e09e37f97b37ffb8de52",
+                "reference": "9313178b05900bb49212e09e37f97b37ffb8de52",
                 "shasum": ""
             },
             "require": {
@@ -260,10 +260,10 @@
             ],
             "description": "Pure PHP DTLS 1.2 - no FFI, no native libraries",
             "support": {
-                "source": "https://github.com/altayofficial/dtls/tree/1.0.0",
+                "source": "https://github.com/altayofficial/dtls/tree/1.0.1",
                 "issues": "https://github.com/altayofficial/dtls/issues"
             },
-            "time": "2026-08-19T09:57:18+00:00"
+            "time": "2026-09-16T17:27:00+00:00"
         },
         {
             "name": "altayofficial/webrtc",
