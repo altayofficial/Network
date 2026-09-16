@@ -33,6 +33,7 @@ use altay\network\transport\TransportListener;
 use altay\network\transport\TunableTransport;
 use altay\network\raknet\generic\SocketException;
 use altay\network\raknet\server\Server;
+use altay\network\raknet\server\ServerSession;
 use altay\network\raknet\server\ServerSocket;
 use altay\network\raknet\server\SimpleProtocolAcceptor;
 use altay\network\raknet\utils\ExceptionTraceCleaner;
@@ -45,6 +46,10 @@ final class RakNetTransport implements NameableTransport, RawPacketTransport, Ad
 	private ?Server $server = null;
 	private ?RakNetEventListener $eventListener = null;
 
+	/**
+	 * @phpstan-param positive-int $recvMaxSplitParts
+	 * @phpstan-param positive-int $recvMaxConcurrentSplits
+	 */
 	public function __construct(
 		private \Logger $logger,
 		private string $bindAddress = "0.0.0.0",
@@ -52,7 +57,9 @@ final class RakNetTransport implements NameableTransport, RawPacketTransport, Ad
 		private bool $ipv6 = false,
 		private int $maxMtuSize = 1492,
 		private int $protocolVersion = self::BEDROCK_RAKNET_PROTOCOL_VERSION,
-		private ?int $serverId = null
+		private ?int $serverId = null,
+		private int $recvMaxSplitParts = ServerSession::DEFAULT_MAX_SPLIT_PART_COUNT,
+		private int $recvMaxConcurrentSplits = ServerSession::DEFAULT_MAX_CONCURRENT_SPLIT_COUNT
 	){}
 
 	public function getName() : string{
@@ -78,7 +85,9 @@ final class RakNetTransport implements NameableTransport, RawPacketTransport, Ad
 			new SimpleProtocolAcceptor($this->protocolVersion),
 			new NullServerEventSource(),
 			$this->eventListener,
-			new ExceptionTraceCleaner(dirname(__DIR__, 2))
+			new ExceptionTraceCleaner(dirname(__DIR__, 2)),
+			$this->recvMaxSplitParts,
+			$this->recvMaxConcurrentSplits
 		);
 		$this->eventListener->setServer($this->server);
 	}
