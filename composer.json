@@ -24,16 +24,6 @@
       "php": "8.1.0"
     }
   },
-  "repositories": [
-    {
-      "type": "vcs",
-      "url": "https://github.com/altayofficial/webrtc"
-    },
-    {
-      "type": "vcs",
-      "url": "https://github.com/altayofficial/dtls"
-    }
-  ],
   "autoload": {
     "psr-4": {
       "altay\\network\\": "src/"

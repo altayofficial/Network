@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "3ef435d1f4d2bb8bec21703eae86b998",
+    "content-hash": "37e8d036b8fd31ca0dca54a24d95b517",
     "packages": [
         {
             "name": "pocketmine/binaryutils",
@@ -46,6 +46,7 @@
                 "issues": "https://github.com/pmmp/BinaryUtils/issues",
                 "source": "https://github.com/pmmp/BinaryUtils/tree/0.2.7"
             },
+            "abandoned": true,
             "time": "2025-12-24T04:20:35+00:00"
         },
         {
@@ -87,6 +88,7 @@
                 "issues": "https://github.com/pmmp/Log/issues",
                 "source": "https://github.com/pmmp/Log/tree/0.4.0"
             },
+            "abandoned": true,
             "time": "2021-06-18T19:08:09+00:00"
         },
         {
@@ -242,26 +244,14 @@
                     "altay\\dtls\\": "src/"
                 }
             },
-            "autoload-dev": {
-                "psr-4": {
-                    "altay\\dtls\\tests\\": "tests/"
-                }
-            },
-            "scripts": {
-                "test": [
-                    "phpunit"
-                ],
-                "analyse": [
-                    "phpstan analyse"
-                ]
-            },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "GPL-3.0-or-later"
             ],
             "description": "Pure PHP DTLS 1.2 - no FFI, no native libraries",
             "support": {
-                "source": "https://github.com/altayofficial/dtls/tree/1.0.1",
-                "issues": "https://github.com/altayofficial/dtls/issues"
+                "issues": "https://github.com/altayofficial/dtls/issues",
+                "source": "https://github.com/altayofficial/dtls/tree/1.0.1"
             },
             "time": "2026-09-16T17:27:00+00:00"
         },
@@ -313,32 +303,33 @@
             "type": "library",
             "autoload": {
                 "psr-4": {
-                    "Webrtc\\DTLS\\": "src/dtls/src/",
-                    "Webrtc\\DataChannel\\": "src/datachannel/src/",
-                    "Webrtc\\Exception\\": "src/exception/src/",
                     "Webrtc\\ICE\\": "src/ice/src/",
-                    "Webrtc\\MDNS\\": "src/mdns/src/",
-                    "Webrtc\\Mixin\\": "src/mixin/src/",
                     "Webrtc\\NTP\\": "src/ntp/src/",
-                    "Webrtc\\RTPParameter\\": "src/rtp-parameter/src/",
-                    "Webrtc\\SCTP\\": "src/sctp/src/",
                     "Webrtc\\SDP\\": "src/sdp/src/",
+                    "Webrtc\\DTLS\\": "src/dtls/src/",
+                    "Webrtc\\MDNS\\": "src/mdns/src/",
+                    "Webrtc\\SCTP\\": "src/sctp/src/",
                     "Webrtc\\STUN\\": "src/stun/src/",
-                    "Webrtc\\Stats\\": "src/stats/src/",
                     "Webrtc\\TURN\\": "src/turn/src/",
-                    "Webrtc\\Webrtc\\": "src/webrtc/src/"
+                    "Webrtc\\Mixin\\": "src/mixin/src/",
+                    "Webrtc\\Stats\\": "src/stats/src/",
+                    "Webrtc\\Webrtc\\": "src/webrtc/src/",
+                    "Webrtc\\Exception\\": "src/exception/src/",
+                    "Webrtc\\DataChannel\\": "src/datachannel/src/",
+                    "Webrtc\\RTPParameter\\": "src/rtp-parameter/src/"
                 },
                 "classmap": [
                     "src/turn/src/Trait/TurnConnection.php"
                 ]
             },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "BSD-3-Clause"
             ],
             "description": "A WebRTC library designed special for Altay family",
             "support": {
-                "source": "https://github.com/altayofficial/webrtc/tree/1.6.5",
-                "issues": "https://github.com/altayofficial/webrtc/issues"
+                "issues": "https://github.com/altayofficial/webrtc/issues",
+                "source": "https://github.com/altayofficial/webrtc/tree/1.6.5"
             },
             "time": "2026-09-15T15:58:48+00:00"
         },
@@ -567,16 +558,16 @@
         },
         {
             "name": "nikic/php-parser",
-            "version": "v5.8.0",
+            "version": "v5.9.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/nikic/PHP-Parser.git",
-                "reference": "044a6a392ff8ad0d61f14370a5fbbd0a0107152f"
+                "reference": "9e33da9553fe7786f0962b35f4e4ecf01be89def"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/nikic/PHP-Parser/zipball/044a6a392ff8ad0d61f14370a5fbbd0a0107152f",
-                "reference": "044a6a392ff8ad0d61f14370a5fbbd0a0107152f",
+                "url": "https://api.github.com/repos/nikic/PHP-Parser/zipball/9e33da9553fe7786f0962b35f4e4ecf01be89def",
+                "reference": "9e33da9553fe7786f0962b35f4e4ecf01be89def",
                 "shasum": ""
             },
             "require": {
@@ -618,9 +609,9 @@
             ],
             "support": {
                 "issues": "https://github.com/nikic/PHP-Parser/issues",
-                "source": "https://github.com/nikic/PHP-Parser/tree/v5.8.0"
+                "source": "https://github.com/nikic/PHP-Parser/tree/v5.9.0"
             },
-            "time": "2026-07-04T14:30:18+00:00"
+            "time": "2026-09-13T18:51:52+00:00"
         },
         {
             "name": "phar-io/manifest",
@@ -742,11 +733,11 @@
         },
         {
             "name": "phpstan/phpstan",
-            "version": "2.2.12",
+            "version": "2.2.14",
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/174b0d88710f00a42598886504dd7a146f91ace5",
-                "reference": "174b0d88710f00a42598886504dd7a146f91ace5",
+                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/9c672e7a8e791dfc3d30e55f683e73fc0b63a3ac",
+                "reference": "9c672e7a8e791dfc3d30e55f683e73fc0b63a3ac",
                 "shasum": ""
             },
             "require": {
@@ -802,7 +793,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-08-31T19:09:43+00:00"
+            "time": "2026-09-12T21:39:33+00:00"
         },
         {
             "name": "phpunit/php-code-coverage",
@@ -1349,20 +1340,20 @@
         },
         {
             "name": "ramsey/uuid",
-            "version": "4.9.3",
+            "version": "4.9.4",
             "source": {
                 "type": "git",
                 "url": "https://github.com/ramsey/uuid.git",
-                "reference": "1df15849d00943a67d677dc9cfd80795f038c9f8"
+                "reference": "75d73f48d02797c2c285a7e9f348fadc0102ffe2"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/ramsey/uuid/zipball/1df15849d00943a67d677dc9cfd80795f038c9f8",
-                "reference": "1df15849d00943a67d677dc9cfd80795f038c9f8",
+                "url": "https://api.github.com/repos/ramsey/uuid/zipball/75d73f48d02797c2c285a7e9f348fadc0102ffe2",
+                "reference": "75d73f48d02797c2c285a7e9f348fadc0102ffe2",
                 "shasum": ""
             },
             "require": {
-                "brick/math": ">=0.8.16 <=0.18",
+                "brick/math": "^0.8.16 || ^0.9 || ^0.10 || ^0.11 || ^0.12 || ^0.13 || ^0.14 || ^0.15 || ^0.16 || ^0.17 || ^0.18 || ^0.19 || ^0.20 || ^1.0",
                 "php": "^8.0",
                 "ramsey/collection": "^1.2 || ^2.0"
             },
@@ -1421,9 +1412,9 @@
             ],
             "support": {
                 "issues": "https://github.com/ramsey/uuid/issues",
-                "source": "https://github.com/ramsey/uuid/tree/4.9.3"
+                "source": "https://github.com/ramsey/uuid/tree/4.9.4"
             },
-            "time": "2026-06-18T03:57:49+00:00"
+            "time": "2026-09-16T11:39:30+00:00"
         },
         {
             "name": "react/async",
@@ -1731,16 +1722,16 @@
         },
         {
             "name": "react/http",
-            "version": "v1.11.0",
+            "version": "v1.11.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/reactphp/http.git",
-                "reference": "8db02de41dcca82037367f67a2d4be365b1c4db9"
+                "reference": "e5b8eb2654dec6cbbc692a39f05ea4ecd40c8cc1"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/reactphp/http/zipball/8db02de41dcca82037367f67a2d4be365b1c4db9",
-                "reference": "8db02de41dcca82037367f67a2d4be365b1c4db9",
+                "url": "https://api.github.com/repos/reactphp/http/zipball/e5b8eb2654dec6cbbc692a39f05ea4ecd40c8cc1",
+                "reference": "e5b8eb2654dec6cbbc692a39f05ea4ecd40c8cc1",
                 "shasum": ""
             },
             "require": {
@@ -1757,7 +1748,7 @@
                 "clue/http-proxy-react": "^1.8",
                 "clue/reactphp-ssh-proxy": "^1.4",
                 "clue/socks-react": "^1.4",
-                "phpunit/phpunit": "^9.6 || ^5.7 || ^4.8.36",
+                "phpunit/phpunit": "^9.6 || ^8.5 || ^5.7 || ^4.8.36",
                 "react/async": "^4.2 || ^3 || ^2",
                 "react/promise-stream": "^1.4",
                 "react/promise-timer": "^1.11"
@@ -1810,7 +1801,7 @@
             ],
             "support": {
                 "issues": "https://github.com/reactphp/http/issues",
-                "source": "https://github.com/reactphp/http/tree/v1.11.0"
+                "source": "https://github.com/reactphp/http/tree/v1.11.1"
             },
             "funding": [
                 {
@@ -1818,7 +1809,7 @@
                     "type": "open_collective"
                 }
             ],
-            "time": "2024-11-20T15:24:08+00:00"
+            "time": "2026-09-09T07:08:28+00:00"
         },
         {
             "name": "react/promise",
