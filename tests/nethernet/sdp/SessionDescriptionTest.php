@@ -47,4 +47,10 @@ final class SessionDescriptionTest extends TestCase{
 		self::assertCount(1, $candidates);
 		self::assertSame("9.9.9.9", $candidates[0]->address);
 	}
+
+	public function testWithoutCandidatesKeepsEverythingElse() : void{
+		$sdp = "v=0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=candidate:1 1 udp 1 10.0.0.1 5000 typ host\r\na=end-of-candidates\r\na=ice-ufrag:x\r\n";
+
+		self::assertSame("v=0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=ice-ufrag:x\r\n", SessionDescription::withoutCandidates($sdp));
+	}
 }

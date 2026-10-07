@@ -57,6 +57,22 @@ final class SessionDescription{
 	}
 
 	/**
+	 * Drops every candidate line, and the end-of-candidates marker with them, since a peer that is
+	 * told the candidates are over would ignore the ones that follow on their own.
+	 */
+	public static function withoutCandidates(string $sdp) : string{
+		$lines = [];
+		foreach(explode("\n", $sdp) as $line){
+			$trimmed = trim($line);
+			if(str_starts_with($trimmed, "a=candidate:") || $trimmed === "a=end-of-candidates"){
+				continue;
+			}
+			$lines[] = $line;
+		}
+		return implode("\n", $lines);
+	}
+
+	/**
 	 * @return string[]
 	 */
 	public static function attributes(string $sdp, string $key) : array{

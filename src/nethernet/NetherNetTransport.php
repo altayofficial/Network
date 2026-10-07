@@ -118,7 +118,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	private ?string $discoveryResponse = null;
 	/** @var array<string, int> address => unix time the block expires */
 	private array $blockedAddresses = [];
-	/** @var array<string, array{connection: RTCPeerConnection, networkId: int, address: string, port: int, publicKey: ?string, createdAt: int, outgoing: bool, sink: SignalSink, offer: ?string, answer: ?string, lastSignalAt: float}> */
+	/** @var array<string, array{connection: RTCPeerConnection, networkId: int, address: string, port: int, publicKey: ?string, createdAt: int, outgoing: bool, sink: SignalSink, offer: ?string, answer: ?string, candidates: list<string>, lastSignalAt: float}> */
 	private array $pending = [];
 	/** @var NetherNetSession[] */
 	private array $sessions = [];
@@ -399,15 +399,28 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 					continue;
 				}
 				$this->logger->debug("Repeating offer for connection $connectionId, no answer yet");
-				$entry["sink"]->write(new Signal(Signal::TYPE_OFFER, $connectionId, $entry["offer"]));
+				$this->repeatDescription($connectionId, $entry, Signal::TYPE_OFFER, $entry["offer"]);
 			}else{
 				if($entry["answer"] === null){
 					continue;
 				}
 				$this->logger->debug("Repeating answer for connection $connectionId, the peer has not connected yet");
-				$entry["sink"]->write(new Signal(Signal::TYPE_ANSWER, $connectionId, $entry["answer"]));
+				$this->repeatDescription($connectionId, $entry, Signal::TYPE_ANSWER, $entry["answer"]);
 			}
 			$this->pending[$connectionId]["lastSignalAt"] = $now;
+		}
+	}
+
+	/**
+	 * A trickled description carries none of its candidates, so repeating it alone would leave the
+	 * peer with nowhere to connect to if the candidates were what got lost.
+	 *
+	 * @param array{sink: SignalSink, candidates: list<string>} $entry
+	 */
+	private function repeatDescription(string $connectionId, array $entry, string $type, string $description) : void{
+		$entry["sink"]->write(new Signal($type, $connectionId, $description));
+		foreach($entry["candidates"] as $line){
+			$entry["sink"]->write(new Signal(Signal::TYPE_CANDIDATE, $connectionId, $line));
 		}
 	}
 
@@ -729,7 +742,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			//rather than dropping the retry on the floor
 			if($existing["answer"] !== null){
 				$this->logger->debug("Repeating answer for connection $connectionId, the peer re-sent its offer");
-				$existing["sink"]->write(new Signal(Signal::TYPE_ANSWER, $connectionId, $existing["answer"]));
+				$this->repeatDescription($connectionId, $existing, Signal::TYPE_ANSWER, $existing["answer"]);
 			}
 			return;
 		}
@@ -788,6 +801,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			"sink" => $sink,
 			"offer" => null,
 			"answer" => null,
+			"candidates" => [],
 			"lastSignalAt" => microtime(true)
 		];
 
@@ -1085,6 +1099,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			"sink" => $sink,
 			"offer" => null,
 			"answer" => null,
+			"candidates" => [],
 			"lastSignalAt" => microtime(true)
 		];
 		$connection->on("connectionstatechange", function() use ($connection, $connectionId) : void{
@@ -1295,7 +1310,9 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			if(!$sink->supportsTrickle()){
 				$sdp = $this->advertised->filter($sdp, $this->logger);
 			}
-			$description = $this->withIdentityAttribute($sdp);
+			//the candidates follow on their own, and sending them in the description as well would have
+			//the peer check every one of them twice
+			$description = $this->withIdentityAttribute($sink->supportsTrickle() ? SessionDescription::withoutCandidates($sdp) : $sdp);
 			//kept so a repeated offer can be answered, and a lost offer repeated, without renegotiating
 			if(isset($this->pending[$connectionId])){
 				$this->pending[$connectionId][$type === Signal::TYPE_OFFER ? "offer" : "answer"] = $description;
@@ -1354,6 +1371,9 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 				}
 				$signalled[$line] = true;
 				$sink->write(new Signal(Signal::TYPE_CANDIDATE, $connectionId, $line));
+				if(isset($this->pending[$connectionId])){
+					$this->pending[$connectionId]["candidates"][] = $line;
+				}
 			}
 		};
 
