@@ -66,7 +66,7 @@ final class IdentityPolicyTest extends TestCase{
 
 		self::assertCount(1, $signals);
 		self::assertSame(Signal::TYPE_ERROR, $signals[0]->type);
-		self::assertSame((string) SignalErrorCode::IDENTITY_VERIFICATION_FAILED->value, $signals[0]->data);
+		self::assertSame((string) SignalErrorCode::IDENTITY_NOT_ALLOWED->value, $signals[0]->data);
 	}
 
 	public function testUnsignedOfferIsAcceptedWhenIdentityIsNotRequired() : void{
@@ -86,7 +86,7 @@ final class IdentityPolicyTest extends TestCase{
 
 		self::assertCount(1, $signals);
 		self::assertSame(Signal::TYPE_ERROR, $signals[0]->type);
-		self::assertSame((string) SignalErrorCode::IDENTITY_VERIFICATION_FAILED->value, $signals[0]->data);
+		self::assertSame((string) SignalErrorCode::IDENTITY_NOT_ALLOWED->value, $signals[0]->data);
 	}
 }
 

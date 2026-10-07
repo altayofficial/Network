@@ -768,7 +768,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			$assertion?->verify($signal->data);
 		}catch(IdentityException $e){
 			$this->logger->info("Rejecting connection $connectionId from $address:$port: invalid identity assertion: " . $e->getMessage());
-			$sink->write(self::errorSignal($connectionId, SignalErrorCode::IDENTITY_VERIFICATION_FAILED));
+			$sink->write(self::errorSignal($connectionId, SignalErrorCode::IDENTITY_NOT_ALLOWED));
 			return;
 		}
 		if($assertion === null){
@@ -777,7 +777,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			$this->logger->debug("Connection $connectionId from $address:$port carries no identity assertion");
 			if($requireIdentity ?? $this->requireIdentity){
 				$this->logger->info("Rejecting connection $connectionId from $address:$port: identity assertion required but not provided");
-				$sink->write(self::errorSignal($connectionId, SignalErrorCode::IDENTITY_VERIFICATION_FAILED));
+				$sink->write(self::errorSignal($connectionId, SignalErrorCode::IDENTITY_NOT_ALLOWED));
 				return;
 			}
 		}
@@ -1156,12 +1156,12 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			$assertion?->verify($signal->data);
 		}catch(IdentityException $e){
 			$this->logger->info("Rejecting answer for connection $signal->connectionId: invalid identity assertion: " . $e->getMessage());
-			$this->dropConnection($signal->connectionId, "invalid server identity", SignalErrorCode::IDENTITY_VERIFICATION_FAILED);
+			$this->dropConnection($signal->connectionId, "invalid server identity", SignalErrorCode::IDENTITY_NOT_ALLOWED);
 			return;
 		}
 		if($assertion === null && $this->requireIdentity){
 			$this->logger->info("Rejecting answer for connection $signal->connectionId: identity assertion required but not provided");
-			$this->dropConnection($signal->connectionId, "missing server identity", SignalErrorCode::IDENTITY_VERIFICATION_FAILED);
+			$this->dropConnection($signal->connectionId, "missing server identity", SignalErrorCode::IDENTITY_NOT_ALLOWED);
 			return;
 		}
 		$session = $this->sessions[Uint64::toSignedInt($signal->connectionId)] ?? null;

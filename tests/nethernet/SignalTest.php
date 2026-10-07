@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace altay\network\tests\nethernet;
 
 use altay\network\nethernet\Signal;
+use altay\network\nethernet\types\SignalErrorCode;
 use PHPUnit\Framework\TestCase;
 
 final class SignalTest extends TestCase{
@@ -41,5 +42,12 @@ final class SignalTest extends TestCase{
 		$parsed = Signal::fromString("CONNECTREQUEST 0000000005 data");
 		self::assertNotNull($parsed);
 		self::assertSame("5", $parsed->connectionId);
+	}
+
+	public function testKnowsTheIdentityErrorCodes() : void{
+		self::assertSame(SignalErrorCode::FAILED_TO_CREATE_IDENTITY_ASSERTION, SignalErrorCode::tryFrom(36));
+		self::assertSame(SignalErrorCode::IDENTITY_NOT_ALLOWED, SignalErrorCode::tryFrom(37));
+		//the old name still resolves for anything written against it
+		self::assertSame(SignalErrorCode::IDENTITY_NOT_ALLOWED, SignalErrorCode::IDENTITY_VERIFICATION_FAILED);
 	}
 }

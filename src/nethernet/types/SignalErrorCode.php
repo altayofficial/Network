@@ -63,5 +63,9 @@ enum SignalErrorCode : int
     case INTERNAL_ERROR_JSON_SERIALIZATION = 33;
     case INVALID_ARGUMENT = 34;
     case GENERIC_FAILURE = 35;
-    case IDENTITY_VERIFICATION_FAILED = 37;
+    case FAILED_TO_CREATE_IDENTITY_ASSERTION = 36;
+    case IDENTITY_NOT_ALLOWED = 37;
+
+    /** @deprecated the code was named after what this side checks rather than what it reports, use IDENTITY_NOT_ALLOWED */
+    public const IDENTITY_VERIFICATION_FAILED = self::IDENTITY_NOT_ALLOWED;
 }
