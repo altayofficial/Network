@@ -53,4 +53,14 @@ final class SessionDescriptionTest extends TestCase{
 
 		self::assertSame("v=0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=ice-ufrag:x\r\n", SessionDescription::withoutCandidates($sdp));
 	}
+
+	public function testMaxMessageSizeComesFromTheDescription() : void{
+		self::assertSame(65536, SessionDescription::maxMessageSize("v=0\r\na=max-message-size:65536\r\n"));
+		self::assertSame(0, SessionDescription::maxMessageSize("v=0\r\na=max-message-size:0\r\n"));
+	}
+
+	public function testMissingMaxMessageSizeMeansTheSctpMinimum() : void{
+		self::assertSame(SessionDescription::DEFAULT_MAX_MESSAGE_SIZE, SessionDescription::maxMessageSize("v=0\r\na=ice-ufrag:x\r\n"));
+		self::assertSame(SessionDescription::DEFAULT_MAX_MESSAGE_SIZE, SessionDescription::maxMessageSize("v=0\r\na=max-message-size:lots\r\n"));
+	}
 }

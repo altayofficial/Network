@@ -47,6 +47,9 @@ final class NetherNetSession implements TransportSession{
 	 */
 	private const MAX_PACKET_SIZE = 4 * 1024 * 1024;
 
+	/** How much of a packet fits in one message, once the counter byte is taken off the peer's limit */
+	private int $maxMessagePayload = self::MAX_MESSAGE_SIZE;
+
 	private bool $connected = true;
 	private bool $openNotified = false;
 	private ?string $authenticatedPublicKey = null;
@@ -85,6 +88,16 @@ final class NetherNetSession implements TransportSession{
 		$this->lastReceiveAt = $this->createdAt;
 		$this->reliableAssembler = new MessageAssembler(true, AnswerRewriter::MAX_MESSAGE_SIZE, self::MAX_PACKET_SIZE);
 		$this->unreliableAssembler = new MessageAssembler(false, AnswerRewriter::MAX_MESSAGE_SIZE, self::MAX_PACKET_SIZE);
+	}
+
+	/**
+	 * Keeps every message within what the peer said it accepts. A peer that set no limit at all
+	 * still gets nothing larger than this side advertises for itself.
+	 */
+	public function limitMessageSize(int $peerMaxMessageSize) : void{
+		if($peerMaxMessageSize > 1){
+			$this->maxMessagePayload = min(self::MAX_MESSAGE_SIZE, $peerMaxMessageSize - 1);
+		}
 	}
 
 	public function getId() : int{
@@ -259,13 +272,13 @@ final class NetherNetSession implements TransportSession{
 			return;
 		}
 		$length = strlen($payload);
-		$segments = max(1, intdiv($length + self::MAX_MESSAGE_SIZE - 1, self::MAX_MESSAGE_SIZE));
+		$segments = max(1, intdiv($length + $this->maxMessagePayload - 1, $this->maxMessagePayload));
 		if($segments > self::MAX_SEGMENTS){
 			throw new \InvalidArgumentException("Payload of $length bytes requires $segments segments (max " . self::MAX_SEGMENTS . ")");
 		}
 		$remaining = $segments - 1;
-		for($offset = 0; $offset === 0 || $offset < $length; $offset += self::MAX_MESSAGE_SIZE){
-			$this->sendSegment($this->reliableChannel, $remaining, substr($payload, $offset, self::MAX_MESSAGE_SIZE));
+		for($offset = 0; $offset === 0 || $offset < $length; $offset += $this->maxMessagePayload){
+			$this->sendSegment($this->reliableChannel, $remaining, substr($payload, $offset, $this->maxMessagePayload));
 			$remaining--;
 		}
 		if($receiptId !== null){
@@ -284,8 +297,8 @@ final class NetherNetSession implements TransportSession{
 			return;
 		}
 		$length = strlen($payload);
-		if($length > self::MAX_MESSAGE_SIZE){
-			throw new \InvalidArgumentException("Payload of $length bytes exceeds the " . self::MAX_MESSAGE_SIZE . " byte limit of the unreliable channel");
+		if($length > $this->maxMessagePayload){
+			throw new \InvalidArgumentException("Payload of $length bytes exceeds the $this->maxMessagePayload byte limit of the unreliable channel");
 		}
 		$this->sendSegment($this->unreliableChannel, 0, $payload);
 	}

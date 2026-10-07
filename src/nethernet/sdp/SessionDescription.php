@@ -25,6 +25,7 @@ declare(strict_types=1);
 
 namespace altay\network\nethernet\sdp;
 
+use function ctype_digit;
 use function explode;
 use function implode;
 use function str_starts_with;
@@ -33,6 +34,8 @@ use function substr;
 use function trim;
 
 final class SessionDescription{
+
+	public const DEFAULT_MAX_MESSAGE_SIZE = 65536;
 
 	private function __construct(){
 
@@ -54,6 +57,19 @@ final class SessionDescription{
 			return $value;
 		}
 		return null;
+	}
+
+	/**
+	 * The largest message the side that wrote this description accepts. Zero means it set no limit,
+	 * and a description that leaves the attribute out only promises the 64 KiB every SCTP endpoint
+	 * has to handle.
+	 */
+	public static function maxMessageSize(string $sdp) : int{
+		$value = self::attribute($sdp, "max-message-size");
+		if($value === null){
+			return self::DEFAULT_MAX_MESSAGE_SIZE;
+		}
+		return ctype_digit($value) ? (int) $value : self::DEFAULT_MAX_MESSAGE_SIZE;
 	}
 
 	/**

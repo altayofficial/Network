@@ -118,7 +118,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	private ?string $discoveryResponse = null;
 	/** @var array<string, int> address => unix time the block expires */
 	private array $blockedAddresses = [];
-	/** @var array<string, array{connection: RTCPeerConnection, networkId: int, address: string, port: int, publicKey: ?string, createdAt: int, outgoing: bool, sink: SignalSink, offer: ?string, answer: ?string, candidates: list<string>, lastSignalAt: float}> */
+	/** @var array<string, array{connection: RTCPeerConnection, networkId: int, address: string, port: int, publicKey: ?string, createdAt: int, outgoing: bool, sink: SignalSink, offer: ?string, answer: ?string, candidates: list<string>, peerMaxMessageSize: ?int, lastSignalAt: float}> */
 	private array $pending = [];
 	/** @var NetherNetSession[] */
 	private array $sessions = [];
@@ -802,6 +802,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			"offer" => null,
 			"answer" => null,
 			"candidates" => [],
+			"peerMaxMessageSize" => SessionDescription::maxMessageSize($signal->data),
 			"lastSignalAt" => microtime(true)
 		];
 
@@ -937,6 +938,10 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			}
 		);
 		$session->setAuthenticatedPublicKey($this->pending[$connectionId]["publicKey"] ?? null);
+		$peerMaxMessageSize = $this->pending[$connectionId]["peerMaxMessageSize"] ?? null;
+		if($peerMaxMessageSize !== null){
+			$session->limitMessageSize($peerMaxMessageSize);
+		}
 		$this->sessions[$sessionId] = $session;
 		//an outgoing connection has its session before it has an answer, and the pending entry is
 		//what routes that answer back to the right peer connection - it is dropped in handleAnswer()
@@ -1100,6 +1105,8 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			"offer" => null,
 			"answer" => null,
 			"candidates" => [],
+			//only known once the answer arrives
+			"peerMaxMessageSize" => null,
 			"lastSignalAt" => microtime(true)
 		];
 		$connection->on("connectionstatechange", function() use ($connection, $connectionId) : void{
@@ -1157,7 +1164,9 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			$this->dropConnection($signal->connectionId, "missing server identity", SignalErrorCode::IDENTITY_VERIFICATION_FAILED);
 			return;
 		}
-		($this->sessions[Uint64::toSignedInt($signal->connectionId)] ?? null)?->setAuthenticatedPublicKey($assertion?->getPublicKeyBase64());
+		$session = $this->sessions[Uint64::toSignedInt($signal->connectionId)] ?? null;
+		$session?->setAuthenticatedPublicKey($assertion?->getPublicKeyBase64());
+		$session?->limitMessageSize(SessionDescription::maxMessageSize($signal->data));
 
 		$connection = $entry["connection"];
 		$answer = $signal->data;
