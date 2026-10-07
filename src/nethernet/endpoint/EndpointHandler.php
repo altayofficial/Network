@@ -63,7 +63,8 @@ final class EndpointHandler{
 		}
 		$networkId = $match[1] ?? "";
 
-		if($request->getMethod() === "GET" && $networkId === ""){
+		//HEAD is a GET without the body, and the server leaves the body off on its own
+		if(($request->getMethod() === "GET" || $request->getMethod() === "HEAD") && $networkId === ""){
 			return self::json(200, EndpointStatus::fromServerData($this->transport->getServerData())->toJson());
 		}
 		if($request->getMethod() !== "POST"){
@@ -122,7 +123,7 @@ final class EndpointHandler{
 		$deferred = new Deferred();
 		$sink = new EndpointSignalSink(function(Signal $reply) use ($deferred, $connectionId) : void{
 			if($reply->type === Signal::TYPE_ANSWER){
-				$deferred->resolve(self::text(200, $reply->data));
+				$deferred->resolve(self::sdp($reply->data));
 				return;
 			}
 			$this->logger->debug("Endpoint negotiation for connection $connectionId failed with code " . $reply->data);
@@ -158,6 +159,10 @@ final class EndpointHandler{
 
 	private static function text(int $status, string $body) : Response{
 		return new Response($status, ["Content-Type" => "text/plain; charset=utf-8", "Connection" => "close"], $body);
+	}
+
+	private static function sdp(string $body) : Response{
+		return new Response(200, ["Content-Type" => "application/sdp", "Connection" => "close"], $body);
 	}
 
 	private static function json(int $status, string $body) : Response{

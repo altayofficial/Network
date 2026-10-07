@@ -98,6 +98,18 @@ final class EndpointRoundTripTest extends TestCase{
 		self::assertEquals(EndpointStatus::fromServerData($serverData), EndpointStatus::fromJson((string) $response->getBody()));
 	}
 
+	public function testHeadIsAnsweredLikeAPing() : void{
+		$logger = new DiscardingLogger();
+		$this->server = new NetherNetTransport($logger, self::SERVER_NETWORK, new ServerData("Altay", levelName: "World"), "127.0.0.1", self::TRANSPORT_PORT);
+
+		$handler = new EndpointHandler($this->server, $logger);
+		$response = $handler(new \React\Http\Message\ServerRequest("HEAD", "http://127.0.0.1/v1/join"));
+
+		self::assertInstanceOf(\React\Http\Message\Response::class, $response);
+		self::assertSame(200, $response->getStatusCode());
+		self::assertSame("application/json", $response->getHeaderLine("Content-Type"));
+	}
+
 	public function testTransportServesTheEndpointItWasGivenAnAddressFor() : void{
 		$logger = new DiscardingLogger();
 		$this->server = new NetherNetTransport(

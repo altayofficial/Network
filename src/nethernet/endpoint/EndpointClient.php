@@ -85,7 +85,7 @@ final class EndpointClient{
 		$url = sprintf("%s/v1/join/%d", rtrim($baseUrl, "/"), $this->networkId);
 
 		return $this->browser
-			->post($url, ["Content-Type" => "text/plain"], $sdp)
+			->post($url, ["Content-Type" => "application/sdp"], $sdp)
 			->then(static function(ResponseInterface $response) use ($url) : string{
 				$body = (string) $response->getBody();
 				if($response->getStatusCode() !== 200){
