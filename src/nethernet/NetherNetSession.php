@@ -134,11 +134,16 @@ final class NetherNetSession implements TransportSession{
 
 	/**
 	 * Binds an inbound data channel to the session. Returns false when the peer opened a channel
-	 * the protocol does not define, or one it has already opened.
+	 * the protocol does not define, one it has already opened, or one under the right name that
+	 * does not deliver the way that name promises.
 	 */
 	public function bindChannel(RTCDataChannel $channel) : bool{
+		if($channel->getProtocol() !== "" || $channel->getMaxPacketLifeTime() !== null){
+			return false;
+		}
 		if($channel->getLabel() === self::RELIABLE_CHANNEL){
-			if($this->reliableChannel !== null){
+			//segments are only put back together in the order they were sent, so nothing may be lost or reordered
+			if($this->reliableChannel !== null || !$channel->isOrdered() || $channel->getMaxRetransmits() !== null){
 				return false;
 			}
 			$this->reliableChannel = $channel;
@@ -153,7 +158,7 @@ final class NetherNetSession implements TransportSession{
 			return true;
 		}
 		if($channel->getLabel() === self::UNRELIABLE_CHANNEL){
-			if($this->unreliableChannel !== null){
+			if($this->unreliableChannel !== null || $channel->isOrdered() || $channel->getMaxRetransmits() !== 0){
 				return false;
 			}
 			$this->unreliableChannel = $channel;

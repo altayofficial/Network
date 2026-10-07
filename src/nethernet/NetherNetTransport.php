@@ -1117,7 +1117,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		//the remote peer never opens channels on a connection it did not dial, so both are created here
 		foreach([
 			new RTCDataChannelParameters(label: NetherNetSession::RELIABLE_CHANNEL, ordered: true),
-			new RTCDataChannelParameters(label: NetherNetSession::UNRELIABLE_CHANNEL, maxRetransmits: 0)
+			new RTCDataChannelParameters(label: NetherNetSession::UNRELIABLE_CHANNEL, maxRetransmits: 0, ordered: false)
 		] as $parameters){
 			$channel = $connection->createDataChannel($parameters);
 			$session->bindChannel($channel);
