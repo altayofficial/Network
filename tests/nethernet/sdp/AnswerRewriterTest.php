@@ -28,6 +28,19 @@ final class AnswerRewriterTest extends TestCase{
 		"a=fingerprint:sha-256 6B:E9:9E:1E\r\n" .
 		"a=setup:active\r\n";
 
+	public function testHidesTheBaseAddressOfReflexiveCandidates() : void{
+		$sdp = str_replace(
+			"a=end-of-candidates\r\n",
+			"a=candidate:2 1 udp 1686052607 203.0.113.7 36595 typ srflx raddr 192.168.1.29 rport 36595\r\na=end-of-candidates\r\n",
+			self::LIBRARY_ANSWER
+		);
+		$conformed = AnswerRewriter::conform($sdp);
+
+		self::assertStringContainsString("typ srflx raddr 0.0.0.0 rport 0\r\n", $conformed);
+		self::assertStringNotContainsString("raddr 192.168.1.29", $conformed);
+		self::assertStringContainsString("192.168.1.29 36595 typ host\r\n", $conformed);
+	}
+
 	public function testRaisesMaxMessageSize() : void{
 		$conformed = AnswerRewriter::conform(self::LIBRARY_ANSWER);
 

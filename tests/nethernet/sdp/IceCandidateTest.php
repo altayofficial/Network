@@ -51,7 +51,7 @@ final class IceCandidateTest extends TestCase{
 		$srflx = IceCandidate::parse("candidate:4 1 udp 1686052607 1.2.3.4 51772 typ srflx raddr 192.168.0.196 rport 51772");
 		self::assertNotNull($srflx);
 		self::assertSame(
-			"candidate:4 1 udp 1686052607 1.2.3.4 51772 typ srflx raddr 192.168.0.196 rport 51772 generation 0 ufrag 4ZcD network-id 2 network-cost 0",
+			"candidate:4 1 udp 1686052607 1.2.3.4 51772 typ srflx raddr 0.0.0.0 rport 0 generation 0 ufrag 4ZcD network-id 2 network-cost 0",
 			$srflx->format(2, "4ZcD")
 		);
 	}
@@ -67,6 +67,28 @@ final class IceCandidateTest extends TestCase{
 		$candidate = new IceCandidate("1", "udp", 100, "10.0.0.1", 5000, "host", "10.0.0.2", 6000);
 
 		self::assertStringNotContainsString("raddr", $candidate->format(0, "x"));
+	}
+
+	public function testFormatAlwaysGivesReflexiveCandidatesABaseAddress() : void{
+		$v4 = new IceCandidate("4", "udp", 100, "1.2.3.4", 5000, "srflx");
+		self::assertStringContainsString("typ srflx raddr 0.0.0.0 rport 0 generation", $v4->format(0, "x"));
+
+		$v6 = new IceCandidate("5", "udp", 100, "2001:db8::1", 5000, "relay", "fd00::2", 6000);
+		self::assertStringContainsString("typ relay raddr :: rport 0 generation", $v6->format(0, "x"));
+	}
+
+	public function testRelatedAddressIsZeroedInSdpLines() : void{
+		self::assertSame(
+			"a=candidate:4 1 udp 1686052607 1.2.3.4 51772 typ srflx raddr 0.0.0.0 rport 0 generation 0 network-id 1",
+			IceCandidate::withoutRelatedAddress("a=candidate:4 1 udp 1686052607 1.2.3.4 51772 typ srflx raddr 192.168.0.196 rport 51772 generation 0 network-id 1")
+		);
+		self::assertSame(
+			"a=candidate:4 1 udp 1686052607 1.2.3.4 51772 typ srflx raddr 0.0.0.0 rport 0\r",
+			IceCandidate::withoutRelatedAddress("a=candidate:4 1 udp 1686052607 1.2.3.4 51772 typ srflx\r")
+		);
+		$host = "a=candidate:1 1 udp 2122260223 192.168.0.196 46243 typ host";
+		self::assertSame($host, IceCandidate::withoutRelatedAddress($host));
+		self::assertSame("a=ice-ufrag:yhbK", IceCandidate::withoutRelatedAddress("a=ice-ufrag:yhbK"));
 	}
 
 	public function testSdpValueDropsThePrefix() : void{

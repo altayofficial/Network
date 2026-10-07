@@ -58,6 +58,9 @@ final class AnswerRewriter{
 		$lines = self::withMaxMessageSize($lines);
 		$lines = self::withIceOptions($lines);
 		$lines = self::withExtmapAllowMixed($lines);
+		foreach($lines as $index => $line){
+			$lines[$index] = IceCandidate::withoutRelatedAddress($line);
+		}
 
 		return implode($eol, $lines) . $trailing;
 	}

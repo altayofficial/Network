@@ -32,7 +32,11 @@ use function in_array;
 use function inet_pton;
 use function ltrim;
 use function ord;
+use function preg_match;
+use function preg_quote;
+use function preg_replace;
 use function preg_split;
+use function str_contains;
 use function str_repeat;
 use function str_starts_with;
 use function strlen;
@@ -157,8 +161,36 @@ final class IceCandidate{
 		return !($first === 0xfe && (ord($packed[1]) & 0xc0) === 0x80); //fe80::/10 link-local
 	}
 
+	/**
+	 * The candidate as it is signalled to a peer. A reflexive or relayed candidate still names a
+	 * base address, but the real one is this server's own interface, so it goes out unspecified.
+	 */
 	public function format(int $networkId, string $ufrag) : string{
-		return "candidate:" . $this->toSdpValue() . " generation 0 ufrag $ufrag network-id $networkId network-cost 0";
+		$out = "candidate:$this->foundation 1 $this->protocol $this->priority $this->address $this->port typ $this->type";
+		if(in_array($this->type, self::RELATED_TYPES, true)){
+			$out .= " raddr " . self::unspecifiedAddressFor($this->address) . " rport 0";
+		}
+		return $out . " generation 0 ufrag $ufrag network-id $networkId network-cost 0";
+	}
+
+	/**
+	 * Rewrites the base address of a reflexive or relayed candidate line to the unspecified address,
+	 * adding it when the line left it out. Any other line comes back untouched.
+	 */
+	public static function withoutRelatedAddress(string $line) : string{
+		$candidate = self::parse($line);
+		if($candidate === null || !in_array($candidate->type, self::RELATED_TYPES, true)){
+			return $line;
+		}
+		$related = "raddr " . self::unspecifiedAddressFor($candidate->address) . " rport 0";
+		if(preg_match('/ raddr \S+ rport \S+/', $line) === 1){
+			return (string) preg_replace('/ raddr \S+ rport \S+/', " $related", $line, 1);
+		}
+		return (string) preg_replace('/ typ ' . preg_quote($candidate->type, '/') . '(?= |\r|$)/', " typ $candidate->type $related", $line, 1);
+	}
+
+	private static function unspecifiedAddressFor(string $address) : string{
+		return str_contains($address, ":") ? "::" : "0.0.0.0";
 	}
 
 	public function toSdpValue() : string{
