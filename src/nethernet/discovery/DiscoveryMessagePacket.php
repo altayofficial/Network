@@ -48,5 +48,9 @@ final class DiscoveryMessagePacket extends DiscoveryPacket{
 	public function decodePayload(PacketSerializer $in) : void{
 		$this->recipientId = $in->getLLong();
 		$this->data = $in->getByteArray();
+		//some clients send a few bytes past the length they declared, and they belong to the signal
+		if(!$in->feof()){
+			$this->data .= $in->getRemaining();
+		}
 	}
 }

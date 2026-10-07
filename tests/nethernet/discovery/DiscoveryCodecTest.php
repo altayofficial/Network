@@ -8,6 +8,8 @@ use altay\network\nethernet\discovery\DiscoveryCodec;
 use altay\network\nethernet\discovery\DiscoveryMessagePacket;
 use altay\network\nethernet\discovery\DiscoveryRequestPacket;
 use altay\network\nethernet\discovery\DiscoveryResponsePacket;
+use altay\network\nethernet\DiscoveryCrypto;
+use altay\network\nethernet\PacketSerializer;
 use PHPUnit\Framework\TestCase;
 
 final class DiscoveryCodecTest extends TestCase{
@@ -39,6 +41,23 @@ final class DiscoveryCodecTest extends TestCase{
 		[$packet, ] = $result;
 		self::assertInstanceOf(DiscoveryMessagePacket::class, $packet);
 		self::assertSame(777, $packet->recipientId);
+		self::assertSame("CONNECTREQUEST 5 data", $packet->data);
+	}
+
+	public function testMessageKeepsBytesPastItsDeclaredLength() : void{
+		$body = new PacketSerializer();
+		$body->putLShort(DiscoveryMessagePacket::ID);
+		$body->putLLong(42);
+		$body->put(str_repeat("\x00", 8));
+		$body->putLLong(777);
+		$body->putByteArray("CONNECTREQUEST 5 da");
+		$body->put("ta");
+		$payload = pack("v", strlen($body->getBuffer()) + 2) . $body->getBuffer();
+
+		$result = DiscoveryCodec::unmarshal(DiscoveryCrypto::checksum($payload) . DiscoveryCrypto::encrypt($payload));
+		self::assertNotNull($result);
+		[$packet, ] = $result;
+		self::assertInstanceOf(DiscoveryMessagePacket::class, $packet);
 		self::assertSame("CONNECTREQUEST 5 data", $packet->data);
 	}
 
