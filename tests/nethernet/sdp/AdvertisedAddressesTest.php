@@ -51,8 +51,28 @@ final class AdvertisedAddressesTest extends TestCase{
 		self::assertStringStartsWith("v=0\r\nm=application", $filtered);
 	}
 
-	public function testKeepsEveryCandidateWhenNoneOfThemMatch() : void{
-		$sdp = $this->answer("172.17.0.1", "10.0.0.5");
+	public function testAnnouncesAnAddressNothingWasGatheredOn() : void{
+		$sdp = $this->answer("172.17.0.1", "10.0.0.5") . "a=end-of-candidates\r\n";
+		$filtered = (new AdvertisedAddresses(["81.2.3.4"]))->filter($sdp, $this->logger());
+
+		self::assertSame(
+			"v=0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n" .
+			"a=candidate:advertised0 1 udp 1694498815 81.2.3.4 50000 typ srflx raddr 0.0.0.0 rport 0\r\n" .
+			"a=end-of-candidates\r\n",
+			$filtered
+		);
+	}
+
+	public function testAnnouncesOnlyTheAddressesThatWereNotGathered() : void{
+		$filtered = (new AdvertisedAddresses(["81.2.3.4", "2001:db8::7"]))->filter($this->answer("81.2.3.4", "172.17.0.1"), $this->logger());
+
+		self::assertSame(1, substr_count($filtered, " 81.2.3.4 "));
+		self::assertStringContainsString("a=candidate:advertised0 1 udp 1694498815 2001:db8::7 50000 typ srflx raddr :: rport 0\r\n", $filtered);
+		self::assertStringNotContainsString("172.17.0.1", $filtered);
+	}
+
+	public function testKeepsEveryCandidateWhenThereIsNoPortToAnnounceOn() : void{
+		$sdp = "v=0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=candidate:1 1 tcp 2130706431 172.17.0.1 50000 typ host tcptype passive\r\n";
 
 		self::assertSame($sdp, (new AdvertisedAddresses(["81.2.3.4"]))->filter($sdp, $this->logger()));
 	}
