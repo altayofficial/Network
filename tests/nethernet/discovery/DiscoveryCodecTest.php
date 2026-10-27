@@ -61,6 +61,23 @@ final class DiscoveryCodecTest extends TestCase{
 		self::assertSame("CONNECTREQUEST 5 data", $packet->data);
 	}
 
+	public function testLongMessageDeclaresTheCappedLengthsAndStillRoundTrips() : void{
+		$signal = "CONNECTREQUEST 5 " . str_repeat("v=0\r\n", 400);
+		$encoded = DiscoveryCodec::marshal(new DiscoveryMessagePacket(777, $signal), 42);
+
+		$payload = DiscoveryCrypto::decrypt(substr($encoded, 32));
+		self::assertNotNull($payload);
+		self::assertSame(1172, unpack("v", $payload)[1]);
+		//length prefix, id, sender, padding and recipient come before the signal's own length
+		self::assertSame(DiscoveryMessagePacket::MAX_DECLARED_LENGTH, unpack("V", $payload, 2 + 2 + 8 + 8 + 8)[1]);
+
+		$result = DiscoveryCodec::unmarshal($encoded);
+		self::assertNotNull($result);
+		[$packet, ] = $result;
+		self::assertInstanceOf(DiscoveryMessagePacket::class, $packet);
+		self::assertSame($signal, $packet->data);
+	}
+
 	public function testRejectsGarbage() : void{
 		self::assertNull(DiscoveryCodec::unmarshal("garbage"));
 		self::assertNull(DiscoveryCodec::unmarshal(str_repeat("\x00", 64)));

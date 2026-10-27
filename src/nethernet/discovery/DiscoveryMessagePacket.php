@@ -26,10 +26,18 @@ declare(strict_types=1);
 namespace altay\network\nethernet\discovery;
 
 use altay\network\nethernet\PacketSerializer;
+use function min;
+use function strlen;
 
 final class DiscoveryMessagePacket extends DiscoveryPacket{
 
 	public const ID = 0x02;
+
+	/**
+	 * The longest a signal is declared, by clients and BDS alike. A longer one, an offer listing
+	 * many candidates for example, simply runs on to the end of the packet.
+	 */
+	public const MAX_DECLARED_LENGTH = 1140;
 
 	public function __construct(
 		public int $recipientId = 0,
@@ -42,7 +50,9 @@ final class DiscoveryMessagePacket extends DiscoveryPacket{
 
 	public function encodePayload(PacketSerializer $out) : void{
 		$out->putLLong($this->recipientId);
-		$out->putByteArray($this->data);
+		//yeah, the length is a lie past the cap, but that is how retail writes it
+		$out->putLInt(min(strlen($this->data), self::MAX_DECLARED_LENGTH));
+		$out->put($this->data);
 	}
 
 	public function decodePayload(PacketSerializer $in) : void{

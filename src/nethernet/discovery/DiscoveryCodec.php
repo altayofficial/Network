@@ -34,6 +34,8 @@ final class DiscoveryCodec{
 	private const CHECKSUM_LENGTH = 32;
 	private const HEADER_PADDING = 8;
 	private const CIPHER_BLOCK_LENGTH = 16;
+	/** The longest a payload is declared, by clients and BDS alike: a signal's longest behind its header */
+	private const MAX_DECLARED_LENGTH = 1172;
 	/**
 	 * Discovery rides on a single datagram and the signalling messages in it are SDP sized, so
 	 * anything past this was never ours. The checksum covers the plaintext and cannot be checked
@@ -67,7 +69,8 @@ final class DiscoveryCodec{
 		$packet->encodePayload($body);
 
 		$buffer = $body->getBuffer();
-		$payload = pack("v", strlen($buffer) + 2) . $buffer;
+		//capped the way retail declares it, the whole payload follows anyway
+		$payload = pack("v", min(strlen($buffer) + 2, self::MAX_DECLARED_LENGTH)) . $buffer;
 
 		return DiscoveryCrypto::checksum($payload) . DiscoveryCrypto::encrypt($payload);
 	}
