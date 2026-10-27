@@ -69,7 +69,11 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 
 	public const DISCOVERY_PORT = 7551;
 
-	private const PENDING_NEGOTIATION_TIMEOUT = 15;
+	/**
+	 * How long a join has from its offer until both data channels are open. A player relayed over
+	 * TURN or on a slow mobile link easily needs more than a LAN peer does.
+	 */
+	public const DEFAULT_HANDSHAKE_TIMEOUT = 30;
 	/**
 	 * How long an established session may stay silent. The peer connection reports nothing when a
 	 * client disappears without closing, so without this the session - and the handful of sockets
@@ -97,6 +101,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 
 	private int $maxPendingNegotiations = self::MAX_PENDING_NEGOTIATIONS;
 	private int $maxNegotiationsPerAddress = self::MAX_NEGOTIATIONS_PER_ADDRESS;
+	private int $handshakeTimeout = self::DEFAULT_HANDSHAKE_TIMEOUT;
 
 	private const ENDPOINT_MAX_CONCURRENT_REQUESTS = 64;
 
@@ -172,6 +177,16 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		}
 		$this->maxPendingNegotiations = $maxPendingNegotiations;
 		$this->maxNegotiationsPerAddress = $maxNegotiationsPerAddress;
+	}
+
+	/**
+	 * How many seconds a join may take from its offer until the session opens.
+	 */
+	public function setHandshakeTimeout(int $seconds) : void{
+		if($seconds < 1){
+			throw new \InvalidArgumentException("Handshake timeout must be positive");
+		}
+		$this->handshakeTimeout = $seconds;
 	}
 
 	public function setCredentials(?Credentials $credentials) : void{
@@ -427,7 +442,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 
 	private function expireStalePending(int $now) : void{
 		foreach($this->pending as $connectionId => $entry){
-			if($now - $entry["createdAt"] >= self::PENDING_NEGOTIATION_TIMEOUT){
+			if($now - $entry["createdAt"] >= $this->handshakeTimeout){
 				$connectionId = (string) $connectionId;
 				$this->logger->debug("Dropping stale pending negotiation $connectionId from " . $entry["address"] . ":" . $entry["port"]);
 				$this->dropConnection($connectionId, "negotiation timed out", SignalErrorCode::NEGOTIATION_TIMEOUT_WAITING_FOR_ACCEPT);
@@ -450,7 +465,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 
 	private function expireUnreadySessions(int $now) : void{
 		foreach($this->sessions as $sessionId => $session){
-			if(!$session->isOpenNotified() && $now - $session->getCreatedAt() >= self::PENDING_NEGOTIATION_TIMEOUT){
+			if(!$session->isOpenNotified() && $now - $session->getCreatedAt() >= $this->handshakeTimeout){
 				$this->logger->debug("Dropping session $sessionId, its data channels did not open in time");
 				$this->closeSession($sessionId, "data channels did not open in time");
 			}
