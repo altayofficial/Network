@@ -48,6 +48,7 @@ use altay\network\transport\NameableTransport;
 use altay\network\transport\TransportException;
 use altay\network\transport\TransportListener;
 use altay\network\utils\Uint64;
+use pocketmine\utils\Binary;
 use React\EventLoop\Loop;
 use React\Http\HttpServer;
 use React\Http\Middleware\LimitConcurrentRequestsMiddleware;
@@ -687,12 +688,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		if($entry !== null){
 			return $entry["address"] === $address && $entry["port"] === $port;
 		}
-		try{
-			$sessionId = Uint64::toSignedInt($connectionId);
-		}catch(\InvalidArgumentException){
-			return false;
-		}
-		$session = $this->sessions[$sessionId] ?? null;
+		$session = $this->sessions[self::sessionIdOf($connectionId)] ?? null;
 		return $session !== null && $session->getAddress() === $address && $session->getPort() === $port;
 	}
 
@@ -731,11 +727,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	 */
 	public function acceptOffer(Signal $signal, int $senderNetworkId, string $address, int $port, SignalSink $sink, ?bool $requireIdentity = null, ?TokenTrust $trust = null) : void{
 		$connectionId = $signal->connectionId;
-		try{
-			$sessionId = Uint64::toSignedInt($connectionId);
-		}catch(\InvalidArgumentException){
-			return;
-		}
+		$sessionId = self::sessionIdOf($connectionId);
 		$existing = $this->pending[$connectionId] ?? null;
 		if($existing !== null){
 			//the peer only repeats an offer when it did not get the answer, so send that answer again
@@ -868,12 +860,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		if($entry !== null){
 			return $entry["connection"];
 		}
-		try{
-			$sessionId = Uint64::toSignedInt($connectionId);
-		}catch(\InvalidArgumentException){
-			return null;
-		}
-		return ($this->sessions[$sessionId] ?? null)?->getConnection();
+		return ($this->sessions[self::sessionIdOf($connectionId)] ?? null)?->getConnection();
 	}
 
 	private function handleCandidate(Signal $signal) : void{
@@ -986,11 +973,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		if($state !== ConnectionState::failed && $state !== ConnectionState::closed){
 			return;
 		}
-		try{
-			$session = $this->sessions[Uint64::toSignedInt($connectionId)] ?? null;
-		}catch(\InvalidArgumentException){
-			$session = null;
-		}
+		$session = $this->sessions[self::sessionIdOf($connectionId)] ?? null;
 		if($session !== null && !$session->isConnected()){
 			return;
 		}
@@ -1020,11 +1003,22 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 
 			}
 		}
-		try{
-			$this->closeSession(Uint64::toSignedInt($connectionId), $reason);
-		}catch(\InvalidArgumentException){
+		$this->closeSession(self::sessionIdOf($connectionId), $reason);
+	}
 
+	/**
+	 * The session a connection ID maps to. The ID is opaque on the wire, retail just happens to send
+	 * a uint64 in decimal, so that is read as the number it is and anything else is hashed down to one.
+	 */
+	private static function sessionIdOf(string $connectionId) : int{
+		if(ctype_digit($connectionId) && ($connectionId === "0" || $connectionId[0] !== "0")){
+			try{
+				return Uint64::toSignedInt($connectionId);
+			}catch(\InvalidArgumentException){
+				//too big for a uint64, so it gets hashed like any other opaque ID
+			}
 		}
+		return Binary::readLong(substr(hash("sha256", $connectionId, true), 0, 8));
 	}
 
 	/**
@@ -1084,7 +1078,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		//the dialling side owns the connection ID, and the session ID is derived from it exactly as
 		//it is for an inbound connection so both directions agree on how sessions are keyed
 		$connectionId = (string) random_int(0, PHP_INT_MAX);
-		$sessionId = Uint64::toSignedInt($connectionId);
+		$sessionId = self::sessionIdOf($connectionId);
 
 		try{
 			$connection = $this->createPeerConnection($connectionId);
@@ -1164,7 +1158,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			$this->dropConnection($signal->connectionId, "missing server identity", SignalErrorCode::IDENTITY_NOT_ALLOWED);
 			return;
 		}
-		$session = $this->sessions[Uint64::toSignedInt($signal->connectionId)] ?? null;
+		$session = $this->sessions[self::sessionIdOf($signal->connectionId)] ?? null;
 		$session?->setAuthenticatedPublicKey($assertion?->getPublicKeyBase64());
 		$session?->limitMessageSize(SessionDescription::maxMessageSize($signal->data));
 

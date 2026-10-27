@@ -25,23 +25,27 @@ final class SignalTest extends TestCase{
 		self::assertSame("a b c", $parsed->data);
 	}
 
-	public function testRejectsMissingFields() : void{
-		self::assertNull(Signal::fromString("CONNECTREQUEST 5"));
+	public function testRejectsAMissingConnectionId() : void{
+		self::assertNull(Signal::fromString("CONNECTREQUEST"));
+		self::assertNull(Signal::fromString("CONNECTREQUEST  data"));
 	}
 
-	public function testRejectsNonNumericConnectionId() : void{
-		self::assertNull(Signal::fromString("CONNECTREQUEST notanumber data"));
-	}
-
-	public function testRejectsConnectionIdAboveUint64() : void{
-		self::assertNull(Signal::fromString("CONNECTREQUEST 18446744073709551616 data"));
-		self::assertNull(Signal::fromString("CONNECTREQUEST 99999999999999999999999 data"));
-	}
-
-	public function testNormalisesLeadingZeroesInConnectionId() : void{
-		$parsed = Signal::fromString("CONNECTREQUEST 0000000005 data");
+	public function testAcceptsASignalWithoutPayload() : void{
+		$parsed = Signal::fromString("CONNECTERROR 5");
 		self::assertNotNull($parsed);
 		self::assertSame("5", $parsed->connectionId);
+		self::assertSame("", $parsed->data);
+	}
+
+	public function testKeepsTheConnectionIdExactlyAsSent() : void{
+		self::assertSame("0000000005", Signal::fromString("CONNECTREQUEST 0000000005 data")?->connectionId);
+		self::assertSame("abc-123", Signal::fromString("CONNECTREQUEST abc-123 data")?->connectionId);
+		self::assertSame("99999999999999999999999", Signal::fromString("CONNECTREQUEST 99999999999999999999999 data")?->connectionId);
+	}
+
+	public function testRejectsAConnectionIdWithControlCharacters() : void{
+		self::assertNull(Signal::fromString("CONNECTREQUEST a\x01b data"));
+		self::assertNull(Signal::fromString("CONNECTREQUEST a\tb data"));
 	}
 
 	public function testKnowsTheIdentityErrorCodes() : void{
