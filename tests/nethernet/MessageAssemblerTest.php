@@ -63,18 +63,54 @@ final class MessageAssemblerTest extends TestCase{
 		$assembler->push("");
 	}
 
-	public function testUnsegmentedChannelAcceptsWholeMessages() : void{
+	public function testUnreliableChannelAcceptsWholeMessages() : void{
 		$assembler = self::assembler(false);
 
 		self::assertSame("hello", $assembler->push("\x00hello"));
 	}
 
-	public function testUnsegmentedChannelRejectsSegments() : void{
+	public function testUnreliableChannelAssemblesSegments() : void{
 		$assembler = self::assembler(false);
 
-		$this->expectException(MessageFormatException::class);
-		$this->expectExceptionMessage("unsegmented channel");
-		$assembler->push("\x01hello");
+		self::assertNull($assembler->push("\x01hel"));
+		self::assertSame("hello", $assembler->push("\x00lo"));
+	}
+
+	public function testUnreliableChannelDropsWhatItCannotRead() : void{
+		$assembler = self::assembler(false, maxSegmentSize: 8);
+
+		self::assertNull($assembler->push(""));
+		self::assertNull($assembler->push("\x00"));
+		self::assertNull($assembler->push("\x00" . str_repeat("x", 9)));
+		self::assertSame("ok", $assembler->push("\x00ok"));
+	}
+
+	public function testUnreliableChannelSkipsTheRestOfAGappedMessage() : void{
+		$assembler = self::assembler(false);
+
+		self::assertNull($assembler->push("\x03abc"));
+		//segment 2 got lost
+		self::assertNull($assembler->push("\x01def"));
+		self::assertNull($assembler->push("\x00ghi"));
+		self::assertSame("next", $assembler->push("\x00next"));
+	}
+
+	public function testUnreliableChannelRestartsOnAHigherCounter() : void{
+		$assembler = self::assembler(false);
+
+		self::assertNull($assembler->push("\x01abc"));
+		//the tail of that message got lost and this one is a new message
+		self::assertNull($assembler->push("\x01new"));
+		self::assertSame("newer", $assembler->push("\x00er"));
+	}
+
+	public function testUnreliableChannelSkipsAPacketPastTheLimit() : void{
+		$assembler = self::assembler(false, maxSegmentSize: 8, maxPacketSize: 16);
+
+		self::assertNull($assembler->push("\x02" . str_repeat("a", 8)));
+		self::assertNull($assembler->push("\x01" . str_repeat("b", 8)));
+		self::assertNull($assembler->push("\x00c"));
+		self::assertSame("d", $assembler->push("\x00d"));
 	}
 
 	public function testCounterOf255IsAccepted() : void{
@@ -115,7 +151,7 @@ final class MessageAssemblerTest extends TestCase{
 		self::assertSame(str_repeat("a", 8) . str_repeat("b", 8), $assembler->push("\x00" . str_repeat("b", 8)));
 	}
 
-	private static function assembler(bool $segmented, int $maxSegmentSize = 1024, int $maxPacketSize = 65536) : MessageAssembler{
-		return new MessageAssembler($segmented, $maxSegmentSize, $maxPacketSize);
+	private static function assembler(bool $reliable, int $maxSegmentSize = 1024, int $maxPacketSize = 65536) : MessageAssembler{
+		return new MessageAssembler($reliable, $maxSegmentSize, $maxPacketSize);
 	}
 }

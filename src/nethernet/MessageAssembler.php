@@ -33,48 +33,63 @@ final class MessageAssembler{
 
 	private int $pendingSegments = 0;
 	private string $buffer = "";
+	/** Whether the rest of a message that can no longer be completed is being skipped */
+	private bool $dropping = false;
 
 	/**
-	 * @param bool $segmented Whether the channel may split a packet at all. An unreliable channel
-	 *                        may not: a dropped segment would leave the rest unusable, so the
-	 *                        counter is required to be zero.
+	 * @param bool $reliable Whether the channel promises every message. A reliable channel that
+	 *                       breaks its framing can never be trusted again, so that ends it. An
+	 *                       unreliable one loses messages anyway, so what cannot be delivered is
+	 *                       dropped and the next message starts clean.
 	 * @param int $maxSegmentSize Largest single message accepted. The size advertised in the SDP is
 	 *                            not enforced by anything below this layer.
 	 * @param int $maxPacketSize Largest packet that may be assembled out of those messages.
 	 */
 	public function __construct(
-		private bool $segmented,
+		private bool $reliable,
 		private int $maxSegmentSize,
 		private int $maxPacketSize
 	){}
 
 	/**
-	 * @throws MessageFormatException when the message cannot belong to the sequence in progress.
-	 *         The caller is expected to drop the peer - a broken sequence can never complete, and
-	 *         continuing to buffer would let a peer grow the buffer without bound.
+	 * @throws MessageFormatException on the reliable channel, when the message cannot belong to the
+	 *         sequence in progress. The caller is expected to drop the peer - a broken sequence can
+	 *         never complete, and continuing to buffer would let a peer grow the buffer without bound.
 	 */
 	public function push(string $data) : ?string{
 		if(strlen($data) < 2){
 			//a segment always carries the counter byte plus at least one payload byte
-			throw new MessageFormatException("Received a message without a payload");
+			$this->broken("Received a message without a payload");
+			return null;
 		}
 
 		if(strlen($data) - 1 > $this->maxSegmentSize){
-			throw new MessageFormatException("Received a " . (strlen($data) - 1) . " byte message, the limit is $this->maxSegmentSize");
+			$this->broken("Received a " . (strlen($data) - 1) . " byte message, the limit is $this->maxSegmentSize");
+			return null;
 		}
 
 		$remaining = ord($data[0]);
-		if(!$this->segmented && $remaining !== 0){
-			throw new MessageFormatException("Received a segmented message on an unsegmented channel");
-		}
-		if(strlen($this->buffer) + strlen($data) - 1 > $this->maxPacketSize){
-			throw new MessageFormatException("Assembled packet would exceed the $this->maxPacketSize byte limit");
-		}
 		if($this->pendingSegments > 0 && $this->pendingSegments - 1 !== $remaining){
-			throw new MessageFormatException("Expected segment counter " . ($this->pendingSegments - 1) . ", got $remaining");
+			$expected = $this->pendingSegments - 1;
+			$this->broken("Expected segment counter $expected, got $remaining");
+			if($remaining < $expected){
+				//segments went missing inside this message, so follow its countdown out and start
+				//clean on the next one. A higher counter already is the next one, a countdown only falls
+				$this->dropping = true;
+			}
+		}
+
+		if(!$this->dropping && strlen($this->buffer) + strlen($data) - 1 > $this->maxPacketSize){
+			$this->broken("Assembled packet would exceed the $this->maxPacketSize byte limit");
+			$this->dropping = true;
 		}
 
 		$this->pendingSegments = $remaining;
+		if($this->dropping){
+			$this->dropping = $remaining > 0;
+			return null;
+		}
+
 		$this->buffer .= substr($data, 1);
 		if($remaining > 0){
 			return null;
@@ -83,5 +98,19 @@ final class MessageAssembler{
 		$packet = $this->buffer;
 		$this->buffer = "";
 		return $packet;
+	}
+
+	/**
+	 * Throws on the reliable channel. On the unreliable one it forgets whatever was being assembled.
+	 *
+	 * @throws MessageFormatException
+	 */
+	private function broken(string $reason) : void{
+		if($this->reliable){
+			throw new MessageFormatException($reason);
+		}
+		$this->pendingSegments = 0;
+		$this->buffer = "";
+		$this->dropping = false;
 	}
 }
