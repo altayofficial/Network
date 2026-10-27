@@ -46,6 +46,11 @@ final class NetherNetSession implements TransportSession{
 	 * batches stay far below this, it only exists to bound what a peer can make the server hold.
 	 */
 	private const MAX_PACKET_SIZE = 4 * 1024 * 1024;
+	/**
+	 * How much may wait in the data channels before the session is given up on. Only a peer that
+	 * stopped reading gets here, and without a cap every packet sent to it stays in memory.
+	 */
+	private const MAX_QUEUED_BYTES = 64 * 1024 * 1024;
 
 	/** How much of a packet fits in one message, once the counter byte is taken off the peer's limit */
 	private int $maxMessagePayload = self::MAX_MESSAGE_SIZE;
@@ -277,6 +282,9 @@ final class NetherNetSession implements TransportSession{
 			return;
 		}
 		$length = strlen($payload);
+		if(!$this->hasRoomFor($length)){
+			return;
+		}
 		$segments = max(1, intdiv($length + $this->maxMessagePayload - 1, $this->maxMessagePayload));
 		if($segments > self::MAX_SEGMENTS){
 			throw new \InvalidArgumentException("Payload of $length bytes requires $segments segments (max " . self::MAX_SEGMENTS . ")");
@@ -305,7 +313,28 @@ final class NetherNetSession implements TransportSession{
 		if($length > $this->maxMessagePayload){
 			throw new \InvalidArgumentException("Payload of $length bytes exceeds the $this->maxMessagePayload byte limit of the unreliable channel");
 		}
+		if(!$this->hasRoomFor($length)){
+			return;
+		}
 		$this->sendSegment($this->unreliableChannel, 0, $payload);
+	}
+
+	/**
+	 * What the data channels hold that has yet to go out on the wire.
+	 */
+	public function getQueuedBytes() : int{
+		return ($this->reliableChannel?->getBufferedAmount() ?? 0) + ($this->unreliableChannel?->getBufferedAmount() ?? 0);
+	}
+
+	/**
+	 * Closes the session when queueing $length more bytes would pass the cap.
+	 */
+	private function hasRoomFor(int $length) : bool{
+		if($this->getQueuedBytes() + $length <= self::MAX_QUEUED_BYTES){
+			return true;
+		}
+		$this->closeWithError("more than " . self::MAX_QUEUED_BYTES . " bytes are waiting to be sent");
+		return false;
 	}
 
 	private function sendSegment(RTCDataChannel $channel, int $remaining, string $payload) : void{
