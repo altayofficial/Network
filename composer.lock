@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "37e8d036b8fd31ca0dca54a24d95b517",
+    "content-hash": "0a23b8a07ea784a524ab5ba5c23444e2",
     "packages": [
         {
             "name": "pocketmine/binaryutils",
@@ -257,16 +257,16 @@
         },
         {
             "name": "altayofficial/webrtc",
-            "version": "1.6.5",
+            "version": "1.7.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/altayofficial/webrtc.git",
-                "reference": "0f8557ee74d40c2d5c3cc34eac9c0f1d93155fa7"
+                "reference": "c1ed7c8fc6ca76dcf1078a73334e5806bcc82d14"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/altayofficial/webrtc/zipball/0f8557ee74d40c2d5c3cc34eac9c0f1d93155fa7",
-                "reference": "0f8557ee74d40c2d5c3cc34eac9c0f1d93155fa7",
+                "url": "https://api.github.com/repos/altayofficial/webrtc/zipball/c1ed7c8fc6ca76dcf1078a73334e5806bcc82d14",
+                "reference": "c1ed7c8fc6ca76dcf1078a73334e5806bcc82d14",
                 "shasum": ""
             },
             "require": {
@@ -329,9 +329,9 @@
             "description": "A WebRTC library designed special for Altay family",
             "support": {
                 "issues": "https://github.com/altayofficial/webrtc/issues",
-                "source": "https://github.com/altayofficial/webrtc/tree/1.6.5"
+                "source": "https://github.com/altayofficial/webrtc/tree/1.7.0"
             },
-            "time": "2026-09-15T15:58:48+00:00"
+            "time": "2026-10-27T13:33:34+00:00"
         },
         {
             "name": "brick/math",
