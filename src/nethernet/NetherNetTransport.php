@@ -131,6 +131,8 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 
 	private ?float $lastTickAt = null;
 
+	private ?Credentials $signallingCredentials = null;
+
 	private AddressBook $addressBook;
 	private AdvertisedAddresses $advertised;
 	private int $lastMaintenance = 0;
@@ -189,8 +191,13 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		$this->handshakeTimeout = $seconds;
 	}
 
+	/**
+	 * The ICE servers a signalling service handed out, a TURN auth reply for example. They are used
+	 * alongside the ones the transport was configured with, not instead of them, and dropped again
+	 * once they expire.
+	 */
 	public function setCredentials(?Credentials $credentials) : void{
-		$this->credentials = $credentials;
+		$this->signallingCredentials = $credentials;
 	}
 
 	public function getName() : string{
@@ -1192,15 +1199,15 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	}
 
 	private function createPeerConnection(string $connectionId) : RTCPeerConnection{
-		if($this->credentials !== null && $this->credentials->isExpired()){
+		if($this->signallingCredentials !== null && $this->signallingCredentials->isExpired()){
 			$this->logger->debug("Discarding expired NetherNet credentials");
-			$this->credentials = null;
+			$this->signallingCredentials = null;
 		}
 		//without an explicit list the library falls back to a public STUN server, which means an
 		//internet round trip per connection just to learn a reflexive candidate that a LAN peer can
 		//never use. Signalling on the discovery socket is local, so host candidates are all it wants.
 		$configuration = new RTCConfiguration($this->withSharedCertificate(
-			$this->credentials?->toPeerConnectionConfiguration() ?? ["iceServers" => []]
+			["iceServers" => $this->iceServers()]
 		));
 		if($this->relayOnly){
 			$configuration->iceSettings()->setTransportPolicy(TransportPolicyType::RELAY);
@@ -1230,6 +1237,24 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			$connection->setLogger(new WebrtcLogger($this->logger, "Connection $connectionId: "));
 		}
 		return $connection;
+	}
+
+	/**
+	 * The configured ICE servers followed by whatever the signalling handed out, so neither side
+	 * loses the other's.
+	 *
+	 * @return list<array{urls: string[], username?: string, credential?: string}>
+	 */
+	private function iceServers() : array{
+		$servers = [];
+		foreach([$this->credentials, $this->signallingCredentials] as $credentials){
+			if($credentials !== null && !$credentials->isExpired()){
+				foreach($credentials->toPeerConnectionConfiguration()["iceServers"] as $server){
+					$servers[] = $server;
+				}
+			}
+		}
+		return $servers;
 	}
 
 	/**
