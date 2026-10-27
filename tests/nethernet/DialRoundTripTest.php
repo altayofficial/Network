@@ -10,6 +10,7 @@ use altay\network\transport\Transport;
 use altay\network\transport\TransportListener;
 use altay\network\transport\TransportSession;
 use PHPUnit\Framework\TestCase;
+use Webrtc\STUN\UdpMux;
 
  /*
  * @group integration
@@ -20,18 +21,22 @@ final class DialRoundTripTest extends TestCase{
 
 	private const LISTEN_PORT = 17551;
 	private const DIAL_PORT = 17552;
+	private const SECOND_DIAL_PORT = 17553;
+	private const SHARED_MEDIA_PORT = 17554;
 	private const LISTEN_NETWORK = 111;
 	private const DIAL_NETWORK = 222;
 	private const TIMEOUT = 30;
 
 	private ?NetherNetTransport $listening = null;
 	private ?NetherNetTransport $dialling = null;
+	private ?NetherNetTransport $secondDialling = null;
 
 	protected function setUp() : void{
 		$this->requirePeerConnection();
 	}
 
 	protected function tearDown() : void{
+		$this->secondDialling?->shutdown();
 		$this->dialling?->shutdown();
 		$this->listening?->shutdown();
 	}
@@ -77,6 +82,57 @@ final class DialRoundTripTest extends TestCase{
 		self::assertTrue($listeningEvents->opened, "the listening side never reported the session open");
 		self::assertSame([$small, $large], $listeningEvents->packets);
 		self::assertSame($session->getId(), $listeningEvents->sessionId);
+	}
+
+	public function testDiallersShareTheListenersMediaPort() : void{
+		if(!class_exists(UdpMux::class)){
+			self::markTestSkipped("the webrtc library has no shared port support");
+		}
+		$logger = new DiscardingLogger();
+
+		$listeningEvents = new RecordingListener();
+		$this->listening = new NetherNetTransport($logger, self::LISTEN_NETWORK, new ServerData("Altay", levelName: "World"), "127.0.0.1", self::LISTEN_PORT);
+		$this->listening->setUdpPort(self::SHARED_MEDIA_PORT);
+		$this->listening->start($listeningEvents);
+
+		$sessions = [];
+		$events = [];
+		foreach([[self::DIAL_NETWORK, self::DIAL_PORT], [self::DIAL_NETWORK + 1, self::SECOND_DIAL_PORT]] as $index => [$networkId, $port]){
+			$events[$index] = new RecordingListener();
+			$transport = new NetherNetTransport($logger, $networkId, new ServerData("Client", levelName: "-"), "127.0.0.1", $port);
+			$transport->start($events[$index]);
+			$transport->getAddressBook()->remember(self::LISTEN_NETWORK, "127.0.0.1", self::LISTEN_PORT, time());
+			$sessions[$index] = $transport->dial(self::LISTEN_NETWORK);
+			if($index === 0){
+				$this->dialling = $transport;
+			}else{
+				$this->secondDialling = $transport;
+			}
+		}
+
+		$deadline = microtime(true) + self::TIMEOUT;
+		$sent = false;
+		while(microtime(true) < $deadline){
+			$this->listening->tick();
+			$this->dialling?->tick();
+			$this->secondDialling?->tick();
+
+			if(!$sent && $events[0]->opened && $events[1]->opened){
+				$sessions[0]->sendPacket("first");
+				$sessions[1]->sendPacket("second");
+				$sent = true;
+			}
+			if($sent && count($listeningEvents->packets) >= 2){
+				break;
+			}
+			usleep(20000);
+		}
+
+		self::assertTrue($events[0]->opened && $events[1]->opened, "a dialler never reported its session open");
+		self::assertEqualsCanonicalizing(["first", "second"], $listeningEvents->packets);
+		//both reached the listener on the one port, which is where ICE says their media flows
+		self::assertSame(self::SHARED_MEDIA_PORT, $sessions[0]->getPort());
+		self::assertSame(self::SHARED_MEDIA_PORT, $sessions[1]->getPort());
 	}
 }
 

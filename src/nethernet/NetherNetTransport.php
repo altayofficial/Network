@@ -62,6 +62,7 @@ use Webrtc\ICE\Enum\IceGatheringState;
 use Webrtc\ICE\Enum\TransportPolicyType;
 use Webrtc\ICE\RTCIceCandidate;
 use Webrtc\SDP\RTCSessionDescription;
+use Webrtc\STUN\UdpMux;
 use Webrtc\Webrtc\Enum\ConnectionState;
 use Webrtc\Webrtc\RTCConfiguration;
 use Webrtc\Webrtc\RTCPeerConnection;
@@ -103,6 +104,8 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	private int $maxPendingNegotiations = self::MAX_PENDING_NEGOTIATIONS;
 	private int $maxNegotiationsPerAddress = self::MAX_NEGOTIATIONS_PER_ADDRESS;
 	private int $handshakeTimeout = self::DEFAULT_HANDSHAKE_TIMEOUT;
+	private ?int $udpPort = null;
+	private ?UdpMux $udpMux = null;
 
 	private const ENDPOINT_MAX_CONCURRENT_REQUESTS = 64;
 
@@ -197,6 +200,21 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	 * alongside the ones the transport was configured with, not instead of them, and dropped again
 	 * once they expire.
 	 */
+	/**
+	 * Has every player's media share one UDP port, instead of each getting one of their own, so
+	 * that one port is all the firewall needs to let through. The port range is ignored while this
+	 * is set. Has to be called before start().
+	 */
+	public function setUdpPort(?int $port) : void{
+		if($port !== null && ($port < 1 || $port > 65535)){
+			throw new \InvalidArgumentException("Invalid UDP port $port");
+		}
+		if($this->running){
+			throw new TransportException("The UDP port cannot change while the transport is running");
+		}
+		$this->udpPort = $port;
+	}
+
 	public function setCredentials(?Credentials $credentials) : void{
 		$this->signallingCredentials = $credentials;
 	}
@@ -251,6 +269,15 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		if($this->socket === null && $this->endpointAddress === null){
 			throw new TransportException("NetherNet transport has no way to receive signalling: discovery is unavailable and no endpoint is configured");
 		}
+		try{
+			$this->udpMux = $this->createUdpMux();
+		}catch(TransportException $e){
+			if($this->socket !== null){
+				socket_close($this->socket);
+				$this->socket = null;
+			}
+			throw $e;
+		}
 		$this->listener = $listener;
 		$this->identity = $this->makeIdentity();
 		try{
@@ -301,6 +328,30 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		}
 		socket_set_nonblock($socket);
 		return $socket;
+	}
+
+	/**
+	 * Binds the shared media port up front when the addresses it is needed on are known, so a taken
+	 * port is reported here rather than as joins that never find a path.
+	 *
+	 * @throws TransportException
+	 */
+	private function createUdpMux() : ?UdpMux{
+		if($this->udpPort === null){
+			return null;
+		}
+		$mux = new UdpMux($this->udpPort);
+		$interfaces = $this->iceInterfaces !== [] ? $this->iceInterfaces : $this->boundInterface();
+		foreach($interfaces as $interface){
+			try{
+				$mux->listen($interface);
+			}catch(\RuntimeException $e){
+				$mux->close();
+				throw new TransportException("Failed to bind the NetherNet media port on $interface:$this->udpPort: " . $e->getMessage(), 0, $e);
+			}
+		}
+		$this->logger->info("NetherNet media shares udp/$this->udpPort");
+		return $mux;
 	}
 
 	private function makeIdentity() : ServerIdentity{
@@ -561,6 +612,8 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			socket_close($this->socket);
 			$this->socket = null;
 		}
+		$this->udpMux?->close();
+		$this->udpMux = null;
 		$this->certificateFiles?->delete();
 		$this->certificateFiles = null;
 		set_rejection_handler(null);
@@ -1254,9 +1307,11 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			$configuration->iceSettings()->setInterfaces($interfaces);
 		}
 		//a player's media leaves from a port of its own, and by default that is whatever the system
-		//hands out, which cannot be forwarded through a firewall. Naming a range keeps it to ports
-		//the operator has opened
-		if($this->icePortRange !== null){
+		//hands out, which cannot be forwarded through a firewall. A shared port or a range keeps it
+		//to ports the operator has opened
+		if($this->udpMux !== null){
+			$configuration->iceSettings()->setUdpMux($this->udpMux);
+		}elseif($this->icePortRange !== null){
 			try{
 				$configuration->iceSettings()->setIcePortRange($this->icePortRange[0], $this->icePortRange[1]);
 			}catch(\Throwable $e){
