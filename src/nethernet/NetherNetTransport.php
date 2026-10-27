@@ -57,6 +57,7 @@ use React\Socket\SocketServer;
 use function React\Promise\set_rejection_handler;
 use Webrtc\DataChannel\RTCDataChannel;
 use Webrtc\DataChannel\RTCDataChannelParameters;
+use Webrtc\ICE\Enum\CandidateType;
 use Webrtc\ICE\Enum\IceGatheringState;
 use Webrtc\ICE\Enum\TransportPolicyType;
 use Webrtc\ICE\RTCIceCandidate;
@@ -588,7 +589,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			}
 		}
 		foreach($this->sessions as $sessionId => $session){
-			if($session->getAddress() === $address){
+			if($session->getAddress() === $address || $session->getSignallingAddress() === $address){
 				$this->closeSession($sessionId, "address blocked");
 			}
 		}
@@ -711,7 +712,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			return $entry["address"] === $address && $entry["port"] === $port;
 		}
 		$session = $this->sessions[self::sessionIdOf($connectionId)] ?? null;
-		return $session !== null && $session->getAddress() === $address && $session->getPort() === $port;
+		return $session !== null && $session->getSignallingAddress() === $address && $session->getSignallingPort() === $port;
 	}
 
 	private function handleOffer(Signal $signal, int $senderNetworkId, string $address, int $port) : void{
@@ -951,6 +952,9 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		if($peerMaxMessageSize !== null){
 			$session->limitMessageSize($peerMaxMessageSize);
 		}
+		//an incoming connection only gets its session once the peer opens a channel, which is after
+		//ICE connected, so the state change that would have picked the pair has already been and gone
+		$this->useSelectedPair($connection, $session);
 		$this->sessions[$sessionId] = $session;
 		//an outgoing connection has its session before it has an answer, and the pending entry is
 		//what routes that answer back to the right peer connection - it is dropped in handleAnswer()
@@ -992,14 +996,45 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	 */
 	private function handleConnectionStateChange(RTCPeerConnection $connection, string $connectionId) : void{
 		$state = $connection->getConnectionState();
+		$session = $this->sessions[self::sessionIdOf($connectionId)] ?? null;
+		if($state === ConnectionState::connected){
+			if($session !== null){
+				$this->useSelectedPair($connection, $session);
+				if($this->isBlocked($session->getAddress())){
+					$this->dropConnection($connectionId, "address blocked");
+				}
+			}
+			return;
+		}
 		if($state !== ConnectionState::failed && $state !== ConnectionState::closed){
 			return;
 		}
-		$session = $this->sessions[self::sessionIdOf($connectionId)] ?? null;
 		if($session !== null && !$session->isConnected()){
 			return;
 		}
 		$this->dropConnection($connectionId, "peer connection " . $state->name);
+	}
+
+	/**
+	 * Points the session at the address ICE actually settled on. The signalling address is only
+	 * where the conversation started: an endpoint join reports the HTTP client, and a peer behind
+	 * NAT may well reach us from somewhere else entirely.
+	 *
+	 * A relayed pair is left alone though, its address is the TURN server's and every player
+	 * relayed through it would end up looking like the same one.
+	 */
+	private function useSelectedPair(RTCPeerConnection $connection, NetherNetSession $session) : void{
+		$pairs = $connection->getSctp()?->getDtlsTransport()->getIceTransport()->getIceGatherer()->getIceConnection()->getNominated() ?? [];
+		$pair = reset($pairs);
+		if($pair === false || $pair->getRemoteCandidate()->getType() === CandidateType::relay){
+			return;
+		}
+		[$address, $port] = $pair->getRemoteAddress();
+		if($address === $session->getAddress() && $port === $session->getPort()){
+			return;
+		}
+		$this->logger->debug("Session " . $session->getId() . " signalled from " . $session->getSignallingAddress() . ":" . $session->getSignallingPort() . ", media flows with $address:$port");
+		$session->setRemoteAddress($address, $port);
 	}
 
 	private function closeSession(int $sessionId, string $reason) : void{

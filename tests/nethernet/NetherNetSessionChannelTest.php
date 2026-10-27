@@ -50,4 +50,16 @@ final class NetherNetSessionChannelTest extends TestCase{
 	public function testRejectsAChannelWithASubprotocol() : void{
 		self::assertFalse($this->session()->bindChannel($this->channel(NetherNetSession::RELIABLE_CHANNEL, protocol: "x")));
 	}
+
+	public function testMediaAddressMovesWithoutTouchingTheSignallingOne() : void{
+		$session = $this->session();
+		self::assertSame("127.0.0.1", $session->getAddress());
+
+		$session->setRemoteAddress("203.0.113.7", 50000);
+
+		self::assertSame("203.0.113.7", $session->getAddress());
+		self::assertSame(50000, $session->getPort());
+		self::assertSame("127.0.0.1", $session->getSignallingAddress());
+		self::assertSame(0, $session->getSignallingPort());
+	}
 }

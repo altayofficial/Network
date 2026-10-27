@@ -56,6 +56,9 @@ final class NetherNetSession implements TransportSession{
 	private int $maxMessagePayload = self::MAX_MESSAGE_SIZE;
 
 	private bool $connected = true;
+	/** Where the media really flows, once ICE has picked a pair. Until then, where the join came from */
+	private string $remoteAddress;
+	private int $remotePort;
 	private bool $openNotified = false;
 	private ?string $authenticatedPublicKey = null;
 	private ?RTCDataChannel $reliableChannel = null;
@@ -89,6 +92,8 @@ final class NetherNetSession implements TransportSession{
 		$this->packetHandler = $packetHandler;
 		$this->closeHandler = $closeHandler;
 		$this->ackHandler = $ackHandler;
+		$this->remoteAddress = $address;
+		$this->remotePort = $port;
 		$this->createdAt = time();
 		$this->lastReceiveAt = $this->createdAt;
 		$this->reliableAssembler = new MessageAssembler(true, AnswerRewriter::MAX_MESSAGE_SIZE, self::MAX_PACKET_SIZE);
@@ -109,12 +114,33 @@ final class NetherNetSession implements TransportSession{
 		return $this->connectionId;
 	}
 
+	/**
+	 * The peer's address on the candidate pair ICE selected, or the one its signalling came from
+	 * while there is no pair yet.
+	 */
 	public function getAddress() : string{
-		return $this->address;
+		return $this->remoteAddress;
 	}
 
 	public function getPort() : int{
+		return $this->remotePort;
+	}
+
+	/**
+	 * Where the join was signalled from: the discovery datagram's source, or the HTTP client for an
+	 * endpoint join. Only that address may speak for the connection on the signalling side.
+	 */
+	public function getSignallingAddress() : string{
+		return $this->address;
+	}
+
+	public function getSignallingPort() : int{
 		return $this->port;
+	}
+
+	public function setRemoteAddress(string $address, int $port) : void{
+		$this->remoteAddress = $address;
+		$this->remotePort = $port;
 	}
 
 	public function getPing() : int{
