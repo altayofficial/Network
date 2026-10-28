@@ -29,16 +29,20 @@ use altay\network\nethernet\NetherNetTransport;
 use altay\network\nethernet\Signal;
 use altay\network\utils\Uint64;
 use Psr\Http\Message\ServerRequestInterface;
+use React\Dns\Resolver\ResolverInterface;
 use React\EventLoop\Loop;
 use React\Http\Message\Response;
 use React\Promise\Deferred;
 use React\Promise\PromiseInterface;
 use function ctype_digit;
+use function filter_var;
 use function is_int;
 use function is_string;
 use function preg_match;
 use function random_int;
 use function strlen;
+use function trim;
+use const FILTER_VALIDATE_IP;
 
 final class EndpointHandler{
 
@@ -48,9 +52,14 @@ final class EndpointHandler{
 
 	private const PATH_PATTERN = '#^/v1/join(?:/([0-9]+))?/?$#';
 
+	/**
+	 * @param ResolverInterface|null $resolver turns the host a player asked for into the address it
+	 *                                         stands for; without one only literal addresses count
+	 */
 	public function __construct(
 		private NetherNetTransport $transport,
-		private \Logger $logger
+		private \Logger $logger,
+		private ?ResolverInterface $resolver = null
 	){}
 
 	/**
@@ -95,7 +104,35 @@ final class EndpointHandler{
 			return self::text(403, "Forbidden");
 		}
 
-		return $this->negotiate($networkId, $senderNetworkId, $offer, $address, $port);
+		$host = self::requestedHost($request);
+		if($host === null || filter_var($host, FILTER_VALIDATE_IP) !== false){
+			return $this->negotiate($networkId, $senderNetworkId, $offer, $address, $port, $host);
+		}
+		if($this->resolver === null){
+			return $this->negotiate($networkId, $senderNetworkId, $offer, $address, $port, null);
+		}
+		//ok so a lookup that fails only costs the player that one extra candidate, not the join
+		return $this->resolver->resolve($host)->then(
+			fn(string $resolved) : PromiseInterface => $this->negotiate($networkId, $senderNetworkId, $offer, $address, $port, $resolved),
+			fn() : PromiseInterface => $this->negotiate($networkId, $senderNetworkId, $offer, $address, $port, null)
+		);
+	}
+
+	/**
+	 * The host the player typed in, read off the request. That is the one address we know reaches
+	 * the server from where they are, which a server behind NAT has no other way to find out.
+	 * Anything that does not look like a hostname or an address is ignored, since it is player input.
+	 */
+	private static function requestedHost(ServerRequestInterface $request) : ?string{
+		//hmm, react fills the uri from the Host header, IPv6 still comes with its brackets on
+		$host = trim($request->getUri()->getHost(), "[]");
+		if($host === ""){
+			return null;
+		}
+		if(filter_var($host, FILTER_VALIDATE_IP) !== false){
+			return $host;
+		}
+		return preg_match('/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/i', $host) === 1 ? $host : null;
 	}
 
 	/**
@@ -115,7 +152,7 @@ final class EndpointHandler{
 	/**
 	 * @return PromiseInterface<Response>
 	 */
-	private function negotiate(string $networkId, int $senderNetworkId, string $offer, string $address, int $port) : PromiseInterface{
+	private function negotiate(string $networkId, int $senderNetworkId, string $offer, string $address, int $port, ?string $reachedAddress) : PromiseInterface{
 		//nothing in the request names the connection, so this side assigns the ID
 		$connectionId = (string) random_int(0, PHP_INT_MAX);
 
@@ -128,7 +165,7 @@ final class EndpointHandler{
 			}
 			$this->logger->debug("Endpoint negotiation for connection $connectionId failed with code " . $reply->data);
 			$deferred->resolve(self::text(503, "Service unavailable"));
-		});
+		}, $reachedAddress);
 
 		$this->logger->debug("Endpoint offer from network $networkId at $address:$port, assigned connection $connectionId");
 		//signalling happens over HTTP, but the address is still the player's - bans, rate limits and

@@ -90,6 +90,19 @@ final class AdvertisedAddresses{
 	 * candidate is returned untouched, since whatever was gathered beats nothing.
 	 */
 	public function filter(string $sdp, \Logger $logger) : string{
+		return $this->rewrite($sdp, $logger, true);
+	}
+
+	/**
+	 * Like filter(), but every gathered candidate stays. That is for an address nobody configured,
+	 * such as the one a player says they reached the server on: worth announcing, but no reason to
+	 * take the other paths away from them.
+	 */
+	public function extend(string $sdp, \Logger $logger) : string{
+		return $this->rewrite($sdp, $logger, false);
+	}
+
+	private function rewrite(string $sdp, \Logger $logger, bool $dropUnlisted) : string{
 		if($this->allowed === []){
 			return $sdp;
 		}
@@ -108,10 +121,13 @@ final class AdvertisedAddresses{
 					$hostPort = $candidate->port;
 				}
 				if($candidate === null || !$this->allows($candidate->address)){
-					$dropped++;
-					continue;
+					if($dropUnlisted){
+						$dropped++;
+						continue;
+					}
+				}else{
+					$matched[(string) inet_pton($candidate->address)] = true;
 				}
-				$matched[(string) inet_pton($candidate->address)] = true;
 				$kept++;
 				$lastCandidate = count($lines);
 				$eol = str_ends_with($line, "\r") ? "\r" : "";

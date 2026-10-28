@@ -13,8 +13,12 @@ use altay\network\tests\nethernet\DiscardingLogger;
 use altay\network\tests\nethernet\RecordingListener;
 use altay\network\tests\nethernet\RequiresPeerConnection;
 use PHPUnit\Framework\TestCase;
+use Psr\Http\Message\ServerRequestInterface;
 use React\EventLoop\Loop;
 use React\Http\HttpServer;
+use React\Http\Message\Response;
+use React\Http\Message\ServerRequest;
+use React\Promise\PromiseInterface;
 use React\Socket\SocketServer;
 
 final class EndpointRoundTripTest extends TestCase{
@@ -83,6 +87,50 @@ final class EndpointRoundTripTest extends TestCase{
 		self::assertTrue($clientEvents->opened, "the dialling side never reported the session open");
 		self::assertTrue($serverEvents->opened, "the listening side never reported the session open");
 		self::assertSame([$payload], $serverEvents->packets);
+	}
+
+	/**
+	 * @group integration
+	 */
+	public function testAnswerAnnouncesTheHostThePlayerAskedFor() : void{
+		$this->requirePeerConnection();
+		$logger = new DiscardingLogger();
+
+		//grab a real offer first, posting it to an endpoint that never answers
+		$offer = null;
+		$this->socket = new SocketServer("127.0.0.1:" . self::HTTP_PORT);
+		(new HttpServer(static function(ServerRequestInterface $request) use (&$offer) : Response{
+			$offer = (string) $request->getBody();
+			return new Response(503);
+		}))->listen($this->socket);
+		$this->client = new NetherNetTransport($logger, self::CLIENT_NETWORK, new ServerData("Client", levelName: "-"), "127.0.0.1", self::CLIENT_PORT);
+		$this->client->start(new RecordingListener());
+		$this->client->dialEndpoint("http://127.0.0.1:" . self::HTTP_PORT);
+		$deadline = microtime(true) + self::TIMEOUT;
+		while($offer === null && microtime(true) < $deadline){
+			$this->client->tick();
+			usleep(20000);
+		}
+		self::assertIsString($offer, "the dialling side never posted an offer");
+
+		$this->server = new NetherNetTransport($logger, self::SERVER_NETWORK, new ServerData("Altay", levelName: "World"), "127.0.0.1", self::TRANSPORT_PORT);
+		$this->server->start(new RecordingListener());
+		$request = new ServerRequest("POST", "http://203.0.113.9:19132/v1/join/" . self::CLIENT_NETWORK, [], $offer, "1.1", ["REMOTE_ADDR" => "127.0.0.1", "REMOTE_PORT" => 50000]);
+		$answer = null;
+		$result = (new EndpointHandler($this->server, $logger))($request);
+		self::assertInstanceOf(PromiseInterface::class, $result);
+		$result->then(static function(Response $response) use (&$answer) : void{
+			$answer = (string) $response->getBody();
+		});
+		$deadline = microtime(true) + self::TIMEOUT;
+		while($answer === null && microtime(true) < $deadline){
+			$this->server->tick();
+			usleep(20000);
+		}
+
+		self::assertIsString($answer, "the endpoint never answered");
+		self::assertStringContainsString(" 203.0.113.9 ", $answer);
+		self::assertStringContainsString(" typ host", $answer, "the gathered candidates have to stay");
 	}
 
 	public function testPingAnswersWithTheServerStatus() : void{

@@ -77,6 +77,20 @@ final class AdvertisedAddressesTest extends TestCase{
 		self::assertSame($sdp, (new AdvertisedAddresses(["81.2.3.4"]))->filter($sdp, $this->logger()));
 	}
 
+	public function testExtendAnnouncesTheAddressAndKeepsEveryGatheredCandidate() : void{
+		$extended = (new AdvertisedAddresses(["81.2.3.4"]))->extend($this->answer("172.17.0.1", "10.0.0.5"), $this->logger());
+
+		self::assertStringContainsString("172.17.0.1", $extended);
+		self::assertStringContainsString("10.0.0.5", $extended);
+		self::assertStringContainsString("a=candidate:advertised0 1 udp 1694498815 81.2.3.4 50000 typ srflx", $extended);
+	}
+
+	public function testExtendLeavesAnAlreadyGatheredAddressAlone() : void{
+		$sdp = $this->answer("81.2.3.4", "172.17.0.1");
+
+		self::assertSame($sdp, (new AdvertisedAddresses(["81.2.3.4"]))->extend($sdp, $this->logger()));
+	}
+
 	public function testIgnoresAnAddressItCannotRead() : void{
 		self::assertTrue((new AdvertisedAddresses(["localhost"]))->isEmpty());
 	}

@@ -28,6 +28,7 @@ namespace altay\network\nethernet;
 use altay\network\nethernet\discovery\AddressBook;
 use altay\network\nethernet\endpoint\EndpointClient;
 use altay\network\nethernet\endpoint\EndpointHandler;
+use altay\network\nethernet\endpoint\EndpointSignalSink;
 use altay\network\nethernet\endpoint\SignallingServer;
 use altay\network\nethernet\discovery\DiscoveryCodec;
 use altay\network\nethernet\discovery\DiscoveryMessagePacket;
@@ -45,10 +46,14 @@ use altay\network\nethernet\sdp\SessionDescription;
 use altay\network\nethernet\types\SignalErrorCode;
 use altay\network\transport\AddressBlockingTransport;
 use altay\network\transport\NameableTransport;
+use altay\network\transport\RawPacketTransport;
 use altay\network\transport\TransportException;
 use altay\network\transport\TransportListener;
 use altay\network\utils\Uint64;
 use pocketmine\utils\Binary;
+use React\Dns\Config\Config as DnsConfig;
+use React\Dns\Resolver\Factory as DnsResolverFactory;
+use React\Dns\Resolver\ResolverInterface;
 use React\EventLoop\Loop;
 use React\Http\HttpServer;
 use React\Http\Middleware\LimitConcurrentRequestsMiddleware;
@@ -67,7 +72,7 @@ use Webrtc\Webrtc\Enum\ConnectionState;
 use Webrtc\Webrtc\RTCConfiguration;
 use Webrtc\Webrtc\RTCPeerConnection;
 
-final class NetherNetTransport implements NameableTransport, AddressBlockingTransport{
+final class NetherNetTransport implements NameableTransport, AddressBlockingTransport, RawPacketTransport{
 
 	public const DISCOVERY_PORT = 7551;
 
@@ -106,6 +111,9 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	private int $handshakeTimeout = self::DEFAULT_HANDSHAKE_TIMEOUT;
 	private ?int $udpPort = null;
 	private ?UdpMux $udpMux = null;
+	private bool $udpPortRequired = true;
+	/** @var string[] patterns a datagram on the media port no agent claims has to match to reach the listener */
+	private array $rawPacketFilters = [];
 
 	private const ENDPOINT_MAX_CONCURRENT_REQUESTS = 64;
 
@@ -204,8 +212,11 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	 * Has every player's media share one UDP port, instead of each getting one of their own, so
 	 * that one port is all the firewall needs to let through. The port range is ignored while this
 	 * is set. Has to be called before start().
+	 *
+	 * With $required off, a port something else already holds is only worth a warning, and every
+	 * player gets a port of their own instead. That is for a port nobody asked for explicitly.
 	 */
-	public function setUdpPort(?int $port) : void{
+	public function setUdpPort(?int $port, bool $required = true) : void{
 		if($port !== null && ($port < 1 || $port > 65535)){
 			throw new \InvalidArgumentException("Invalid UDP port $port");
 		}
@@ -213,6 +224,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			throw new TransportException("The UDP port cannot change while the transport is running");
 		}
 		$this->udpPort = $port;
+		$this->udpPortRequired = $required;
 	}
 
 	public function setCredentials(?Credentials $credentials) : void{
@@ -272,11 +284,14 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		try{
 			$this->udpMux = $this->createUdpMux();
 		}catch(TransportException $e){
-			if($this->socket !== null){
-				socket_close($this->socket);
-				$this->socket = null;
+			if($this->udpPortRequired){
+				if($this->socket !== null){
+					socket_close($this->socket);
+					$this->socket = null;
+				}
+				throw $e;
 			}
-			throw $e;
+			$this->logger->warning($e->getMessage() . ", giving every player a media port of their own instead");
 		}
 		$this->listener = $listener;
 		$this->identity = $this->makeIdentity();
@@ -342,6 +357,11 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		}
 		$mux = new UdpMux($this->udpPort);
 		$interfaces = $this->iceInterfaces !== [] ? $this->iceInterfaces : $this->boundInterface();
+		if($interfaces === []){
+			//bound to every address, which ICE would only bind one at a time as players show up, and
+			//until then nothing else sharing the port (query) gets an answer
+			$interfaces = self::localIpv4Addresses();
+		}
 		foreach($interfaces as $interface){
 			try{
 				$mux->listen($interface);
@@ -350,6 +370,9 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 				throw new TransportException("Failed to bind the NetherNet media port on $interface:$this->udpPort: " . $e->getMessage(), 0, $e);
 			}
 		}
+		$mux->onUnrouted(function(string $data, string $peer) : void{
+			$this->handleUnrouted($data, $peer);
+		});
 		$this->logger->info("NetherNet media shares udp/$this->udpPort");
 		return $mux;
 	}
@@ -380,13 +403,26 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		$server = new HttpServer(
 			new LimitConcurrentRequestsMiddleware(self::ENDPOINT_MAX_CONCURRENT_REQUESTS),
 			new RequestBodyBufferMiddleware(EndpointHandler::MAX_BODY_LENGTH),
-			new EndpointHandler($this, $this->logger)
+			new EndpointHandler($this, $this->logger, $this->advertised->isEmpty() ? $this->makeResolver() : null)
 		);
 		$server->on("error", function(\Throwable $e) : void{
 			$this->logger->debug("Endpoint signalling error: " . $e->getMessage());
 		});
 		$server->listen(new SignallingServer($socket, $this->tlsContext()));
 		$this->endpointSocket = $socket;
+	}
+
+	/**
+	 * Only needed to announce the host a player joined by when the operator named no addresses, so
+	 * a machine without a usable resolver just announces the literal ones.
+	 */
+	private function makeResolver() : ?ResolverInterface{
+		try{
+			$nameserver = DnsConfig::loadSystemConfigBlocking()->nameservers[0] ?? null;
+		}catch(\RuntimeException){
+			$nameserver = null;
+		}
+		return $nameserver !== null ? (new DnsResolverFactory())->createCached($nameserver) : null;
 	}
 
 	/**
@@ -641,6 +677,39 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 
 	public function getSession(int $connectionId) : ?NetherNetSession{
 		return $this->sessions[$connectionId] ?? null;
+	}
+
+	public function addRawPacketFilter(string $regex) : void{
+		$this->rawPacketFilters[] = $regex;
+	}
+
+	/**
+	 * Only reaches anyone while the media port is shared, since that is the one socket a stranger
+	 * can send arbitrary datagrams to. Query lives there that way when it is the server port.
+	 */
+	public function sendRaw(string $address, int $port, string $payload) : void{
+		$this->udpMux?->sendUnrouted($payload, str_contains($address, ":") ? "[$address]:$port" : "$address:$port");
+	}
+
+	private function handleUnrouted(string $data, string $peer) : void{
+		if($this->listener === null || $this->rawPacketFilters === []){
+			return;
+		}
+		$colon = strrpos($peer, ":");
+		if($colon === false){
+			return;
+		}
+		//react hands IPv6 peers over as "[addr]:port", the listener wants the bare address
+		$address = trim(substr($peer, 0, $colon), "[]");
+		if($this->isBlocked($address)){
+			return;
+		}
+		foreach($this->rawPacketFilters as $pattern){
+			if(preg_match($pattern, $data) > 0){
+				$this->listener->onRawPacketReceive($this, $address, (int) substr($peer, $colon + 1), $data);
+				return;
+			}
+		}
 	}
 
 	public function blockAddress(string $address, int $timeout = 300) : void{
@@ -1371,6 +1440,26 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	 *
 	 * @return string[]
 	 */
+	/**
+	 * Every IPv4 address on the machine, loopback too so query still answers locally. IPv6 stays
+	 * out: hmm, ICE keys those by their bracketed form, so binding them here would take the port
+	 * out from under the agent that asks for it later.
+	 *
+	 * @return string[]
+	 */
+	private static function localIpv4Addresses() : array{
+		$addresses = [];
+		foreach(net_get_interfaces() ?: [] as $interface){
+			foreach($interface["unicast"] ?? [] as $unicast){
+				$address = $unicast["address"] ?? null;
+				if(is_string($address) && filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false){
+					$addresses[$address] = $address;
+				}
+			}
+		}
+		return array_values($addresses);
+	}
+
 	private function boundInterface() : array{
 		return in_array($this->bindAddress, ["", "0.0.0.0", "::", "[::]"], true) ? [] : [$this->bindAddress];
 	}
@@ -1459,7 +1548,11 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			//a peer that gets its candidates trickled found this server on the local network, where
 			//the addresses an operator advertises to the internet are not the ones that reach it
 			if(!$sink->supportsTrickle()){
-				$sdp = $this->advertised->filter($sdp, $this->logger);
+				$reached = $sink instanceof EndpointSignalSink ? $sink->getReachedAddress() : null;
+				$sdp = !$this->advertised->isEmpty() || $reached === null
+					? $this->advertised->filter($sdp, $this->logger)
+					//nothing configured, so the address the player typed is the best guess at a public one
+					: (new AdvertisedAddresses([$reached]))->extend($sdp, $this->logger);
 			}
 			//the candidates follow on their own, and sending them in the description as well would have
 			//the peer check every one of them twice

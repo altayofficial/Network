@@ -7,6 +7,7 @@ namespace altay\network\tests\nethernet;
 use altay\network\nethernet\NetherNetTransport;
 use altay\network\nethernet\ServerData;
 use altay\network\transport\Transport;
+use altay\network\transport\TransportException;
 use altay\network\transport\TransportListener;
 use altay\network\transport\TransportSession;
 use PHPUnit\Framework\TestCase;
@@ -134,6 +135,71 @@ final class DialRoundTripTest extends TestCase{
 		self::assertSame(self::SHARED_MEDIA_PORT, $sessions[0]->getPort());
 		self::assertSame(self::SHARED_MEDIA_PORT, $sessions[1]->getPort());
 	}
+
+	public function testATakenMediaPortIsOnlyFatalWhenItWasRequired() : void{
+		if(!class_exists(UdpMux::class)){
+			self::markTestSkipped("the webrtc library has no shared port support");
+		}
+		$squatter = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
+		self::assertNotFalse($squatter);
+		self::assertTrue(socket_bind($squatter, "127.0.0.1", self::SHARED_MEDIA_PORT));
+		try{
+			$this->listening = new NetherNetTransport(new DiscardingLogger(), self::LISTEN_NETWORK, new ServerData("Altay", levelName: "World"), "127.0.0.1", self::LISTEN_PORT);
+			$this->listening->setUdpPort(self::SHARED_MEDIA_PORT, required: false);
+			$this->listening->start(new RecordingListener());
+			self::assertTrue($this->listening->isRunning());
+			$this->listening->shutdown();
+
+			$this->listening = new NetherNetTransport(new DiscardingLogger(), self::LISTEN_NETWORK, new ServerData("Altay", levelName: "World"), "127.0.0.1", self::LISTEN_PORT);
+			$this->listening->setUdpPort(self::SHARED_MEDIA_PORT);
+			$this->expectException(TransportException::class);
+			$this->listening->start(new RecordingListener());
+		}finally{
+			socket_close($squatter);
+		}
+	}
+
+	public function testUnclaimedDatagramsOnTheMediaPortReachTheListener() : void{
+		if(!class_exists(UdpMux::class) || !method_exists(UdpMux::class, "onUnrouted")){
+			self::markTestSkipped("the webrtc library cannot hand out unrouted datagrams");
+		}
+		$events = new RecordingListener();
+		$this->listening = new NetherNetTransport(new DiscardingLogger(), self::LISTEN_NETWORK, new ServerData("Altay", levelName: "World"), "127.0.0.1", self::LISTEN_PORT);
+		$this->listening->setUdpPort(self::SHARED_MEDIA_PORT);
+		$this->listening->addRawPacketFilter('/^\xfe\xfd/');
+		$this->listening->start($events);
+
+		$client = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
+		self::assertNotFalse($client);
+		socket_bind($client, "127.0.0.1", 0);
+		socket_set_nonblock($client);
+		socket_sendto($client, "not a query", 11, 0, "127.0.0.1", self::SHARED_MEDIA_PORT);
+		socket_sendto($client, "\xfe\xfdquery", 7, 0, "127.0.0.1", self::SHARED_MEDIA_PORT);
+
+		$reply = "";
+		$deadline = microtime(true) + 5;
+		while(microtime(true) < $deadline){
+			$this->listening->tick();
+			if($events->raw !== [] && $reply === ""){
+				[$address, $port] = $events->raw[0];
+				$this->listening->sendRaw($address, $port, "pong");
+			}
+			$buffer = "";
+			$from = "";
+			$fromPort = 0;
+			if(@socket_recvfrom($client, $buffer, 65535, 0, $from, $fromPort) > 0){
+				$reply = $buffer;
+				break;
+			}
+			usleep(10000);
+		}
+		socket_close($client);
+
+		self::assertCount(1, $events->raw, "only the datagram matching a filter should get through");
+		self::assertSame("127.0.0.1", $events->raw[0][0]);
+		self::assertSame("\xfe\xfdquery", $events->raw[0][2]);
+		self::assertSame("pong", $reply);
+	}
 }
 
 final class DiscardingLogger implements \Logger{
@@ -155,6 +221,8 @@ final class RecordingListener implements TransportListener{
 	public ?int $sessionId = null;
 	/** @var string[] */
 	public array $packets = [];
+	/** @var list<array{string, int, string}> */
+	public array $raw = [];
 
 	public function onSessionOpen(Transport $transport, TransportSession $session) : void{
 		$this->opened = true;
@@ -169,6 +237,9 @@ final class RecordingListener implements TransportListener{
 
 	public function onPacketAck(Transport $transport, TransportSession $session, int $receiptId) : void{}
 	public function onPingUpdate(Transport $transport, TransportSession $session, int $pingMS) : void{}
-	public function onRawPacketReceive(Transport $transport, string $address, int $port, string $payload) : void{}
+	public function onRawPacketReceive(Transport $transport, string $address, int $port, string $payload) : void{
+		$this->raw[] = [$address, $port, $payload];
+	}
+
 	public function onBandwidthUpdate(Transport $transport, int $bytesSentDiff, int $bytesReceivedDiff) : void{}
 }

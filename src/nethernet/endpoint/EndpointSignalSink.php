@@ -37,9 +37,14 @@ final class EndpointSignalSink implements SignalSink{
 
 	/**
 	 * @param \Closure(Signal) : void $onReply called once, with the answer or the error
+	 * @param string|null $reachedAddress the address the player's request was made to, if it named one
 	 */
-	public function __construct(\Closure $onReply){
+	public function __construct(\Closure $onReply, private ?string $reachedAddress = null){
 		$this->onReply = $onReply;
+	}
+
+	public function getReachedAddress() : ?string{
+		return $this->reachedAddress;
 	}
 
 	public function supportsTrickle() : bool{
