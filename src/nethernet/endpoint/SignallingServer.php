@@ -50,6 +50,9 @@ final class SignallingServer extends EventEmitter implements ServerInterface{
 	private const TLS_HANDSHAKE_RECORD = 0x16;
 	//a connection that never says anything holds a socket and a read watcher, so it does not get to wait forever
 	private const FIRST_BYTE_TIMEOUT = 10;
+	//hmm, neither React's TLS handshake nor its header parser has a deadline of its own, so this one
+	//covers the whole exchange. every response closes the connection and negotiation caps at 15s anyway
+	private const CONNECTION_TIMEOUT = 60;
 
 	private ?ConnectionRelay $tlsConnections = null;
 
@@ -87,6 +90,13 @@ final class SignallingServer extends EventEmitter implements ServerInterface{
 			$this->accept($connection);
 			return;
 		}
+
+		$deadline = Loop::addTimer(self::CONNECTION_TIMEOUT, static function() use ($connection, $resource) : void{
+			//a stalled handshake still has its read watcher on the socket, it has to go before the close
+			Loop::removeReadStream($resource);
+			$connection->close();
+		});
+		$connection->on("close", static fn() => Loop::cancelTimer($deadline));
 
 		$timeout = Loop::addTimer(self::FIRST_BYTE_TIMEOUT, static function() use ($connection, $resource) : void{
 			Loop::removeReadStream($resource);
