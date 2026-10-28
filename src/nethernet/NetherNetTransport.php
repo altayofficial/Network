@@ -453,6 +453,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			$this->expireRateLimits($now);
 			$this->addressBook->expire($now);
 			$this->reportBandwidth();
+			$this->reportPings();
 		}
 	}
 
@@ -550,6 +551,23 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		}
 		if(($sent !== 0 || $received !== 0) && $this->listener !== null){
 			$this->listener->onBandwidthUpdate($this, $sent, $received);
+		}
+	}
+
+	/**
+	 * Pushes each session's SCTP round trip estimate to the listener. RakNet reports pings on its own,
+	 * nothing here does unless we ask, so the server would never learn a NetherNet player's ping.
+	 */
+	private function reportPings() : void{
+		if($this->listener === null){
+			return;
+		}
+		foreach($this->sessions as $session){
+			$ping = $session->getPing();
+			//hmm, -1 just means SCTP has not timed a chunk yet, nothing worth reporting
+			if($ping >= 0){
+				$this->listener->onPingUpdate($this, $session, $ping);
+			}
 		}
 	}
 
