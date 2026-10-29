@@ -29,6 +29,7 @@ use altay\network\nethernet\sdp\AnswerRewriter;
 use altay\network\transport\TransportSession;
 use Webrtc\DataChannel\Enum\State;
 use Webrtc\DataChannel\RTCDataChannel;
+use Webrtc\SCTP\RTCSctpTransport;
 use Webrtc\Webrtc\RTCPeerConnection;
 
 final class NetherNetSession implements TransportSession{
@@ -222,9 +223,15 @@ final class NetherNetSession implements TransportSession{
 	 * When this session last had anything to say. A peer that goes away without closing - a crashed
 	 * client, a laptop lid, a router - leaves its connection looking perfectly healthy from here,
 	 * and nothing below this layer will ever tell us otherwise.
+	 *
+	 * SCTP packets count as well as game data. A console can go well past half a minute loading the
+	 * world without sending a single game packet, but it keeps acking what we stream at it.
 	 */
 	public function getLastReceiveAt() : int{
-		return $this->lastReceiveAt;
+		//yeah, both data channels ride the same association, so the reliable one speaks for both
+		$transport = $this->reliableChannel?->getTransport();
+		$sctpReceivedAt = $transport instanceof RTCSctpTransport ? $transport->getLastPacketReceivedAt() : null;
+		return $sctpReceivedAt === null ? $this->lastReceiveAt : max($this->lastReceiveAt, (int) $sctpReceivedAt);
 	}
 
 	public function isOpenNotified() : bool{
