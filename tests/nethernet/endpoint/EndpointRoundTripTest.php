@@ -28,6 +28,7 @@ final class EndpointRoundTripTest extends TestCase{
 	private const HTTP_PORT = 17553;
 	private const TRANSPORT_PORT = 17554;
 	private const CLIENT_PORT = 17555;
+	private const SHARED_MEDIA_PORT = 17556;
 	private const SERVER_NETWORK = 333;
 	private const CLIENT_NETWORK = 444;
 	private const TIMEOUT = 30;
@@ -186,6 +187,159 @@ final class EndpointRoundTripTest extends TestCase{
 		self::assertNotNull($status, "the endpoint never answered the ping");
 		self::assertSame("Altay", $status->serverName);
 		self::assertSame("World", $status->levelName);
+	}
+
+	public function testTransportServesTheEndpointOnEveryAddressItWasGiven() : void{
+		self::requireIpv6Loopback();
+		$logger = new DiscardingLogger();
+		$this->server = new NetherNetTransport(
+			$logger,
+			self::SERVER_NETWORK,
+			new ServerData("Altay", levelName: "World"),
+			"127.0.0.1",
+			self::TRANSPORT_PORT,
+			endpointAddress: "127.0.0.1:" . self::HTTP_PORT
+		);
+		$this->server->addEndpointAddress("[::1]:" . self::HTTP_PORT);
+		$this->server->start(new RecordingListener());
+
+		$statuses = [];
+		foreach(["http://127.0.0.1:" . self::HTTP_PORT, "http://[::1]:" . self::HTTP_PORT] as $url){
+			(new EndpointClient(self::CLIENT_NETWORK))
+				->ping($url)
+				->then(static function(EndpointStatus $received) use (&$statuses, $url) : void{
+					$statuses[$url] = $received->serverName;
+				});
+		}
+
+		$deadline = microtime(true) + self::TIMEOUT;
+		while(count($statuses) < 2 && microtime(true) < $deadline){
+			$this->server->tick();
+			usleep(20000);
+		}
+
+		ksort($statuses);
+		self::assertSame(["http://127.0.0.1:" . self::HTTP_PORT => "Altay", "http://[::1]:" . self::HTTP_PORT => "Altay"], $statuses, "both families should answer");
+	}
+
+	/**
+	 * @return iterable<string, array{bool}>
+	 */
+	public static function mediaPortModes() : iterable{
+		yield "a media port per player" => [false];
+		yield "a shared media port" => [true];
+	}
+
+	/**
+	 * Signals over the IPv6 listener and pins both agents to one global IPv6 address of this
+	 * machine, so the only pair ICE can pick is an IPv6 one. That's the bracket handling on the
+	 * bind, the candidate and every send. Loopback won't do for the media, offers naming it are
+	 * refused on purpose.
+	 *
+	 * @group integration
+	 * @dataProvider mediaPortModes
+	 */
+	public function testOfferPostedOverIpv6CarriesMediaOverIpv6(bool $sharedMediaPort) : void{
+		$this->requirePeerConnection();
+		self::requireIpv6Loopback();
+		$media = self::globalIpv6Address();
+		$logger = new DiscardingLogger();
+
+		$serverEvents = new RecordingListener();
+		$this->server = new NetherNetTransport(
+			$logger,
+			self::SERVER_NETWORK,
+			new ServerData("Altay", levelName: "World"),
+			"127.0.0.1",
+			self::TRANSPORT_PORT,
+			endpointAddress: "127.0.0.1:" . self::HTTP_PORT,
+			iceInterfaces: [$media]
+		);
+		$this->server->addEndpointAddress("[::1]:" . self::HTTP_PORT);
+		if($sharedMediaPort){
+			$this->server->setUdpPort(self::SHARED_MEDIA_PORT);
+		}
+		$this->server->start($serverEvents);
+
+		$clientEvents = new RecordingListener();
+		$this->client = new NetherNetTransport($logger, self::CLIENT_NETWORK, new ServerData("Client", levelName: "-"), "127.0.0.1", self::CLIENT_PORT, iceInterfaces: [$media]);
+		$this->client->start($clientEvents);
+
+		$session = $this->client->dialEndpoint("http://[::1]:" . self::HTTP_PORT);
+
+		$payload = "posted over ipv6";
+		$sent = false;
+		$deadline = microtime(true) + self::TIMEOUT;
+		while(microtime(true) < $deadline){
+			$this->server->tick();
+			$this->client->tick();
+			Loop::futureTick(static fn() => Loop::stop());
+			Loop::run();
+
+			if(!$sent && $clientEvents->opened && $serverEvents->opened){
+				$session->sendPacket($payload);
+				$sent = true;
+			}
+			if($sent && $serverEvents->packets !== []){
+				break;
+			}
+			usleep(20000);
+		}
+
+		self::assertTrue($clientEvents->opened, "the dialling side never reported the session open");
+		self::assertTrue($serverEvents->opened, "the listening side never reported the session open");
+		self::assertSame([$payload], $serverEvents->packets);
+		self::assertSame($media, $session->getAddress(), "media should flow over the IPv6 pair");
+		if($sharedMediaPort){
+			self::assertSame(self::SHARED_MEDIA_PORT, $session->getPort());
+		}
+	}
+
+	private static function requireIpv6Loopback() : void{
+		if(!self::deliversUdp("::1")){
+			self::markTestSkipped("IPv6 loopback is missing or drops traffic here");
+		}
+	}
+
+	/**
+	 * A global IPv6 address of this machine that UDP actually gets through on, or a skip.
+	 */
+	private static function globalIpv6Address() : string{
+		foreach(net_get_interfaces() ?: [] as $interface){
+			foreach($interface["unicast"] ?? [] as $unicast){
+				$address = $unicast["address"] ?? null;
+				if(!is_string($address) || filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) === false){
+					continue;
+				}
+				$packed = (string) inet_pton($address);
+				//loopback and link-local are both refused as candidates, ICE would never use them
+				if($address === "::1" || (ord($packed[0]) === 0xfe && (ord($packed[1]) & 0xc0) === 0x80)){
+					continue;
+				}
+				if(self::deliversUdp($address)){
+					return $address;
+				}
+			}
+		}
+		self::markTestSkipped("this machine has no global IPv6 address that carries traffic");
+	}
+
+	private static function deliversUdp(string $address) : bool{
+		//hmm, binding isn't enough, some sandboxes and containers let you bind and then drop
+		//everything sent there, so only a datagram that actually comes back counts
+		$probe = @stream_socket_server("udp://[$address]:0", $errno, $errstr, STREAM_SERVER_BIND);
+		if($probe === false){
+			return false;
+		}
+		$sender = @stream_socket_client("udp://" . stream_socket_get_name($probe, false), $errno, $errstr);
+		$read = [$probe];
+		$write = $except = null;
+		$delivered = $sender !== false && @fwrite($sender, "probe") === 5 && @stream_select($read, $write, $except, 1) === 1;
+		if($sender !== false){
+			fclose($sender);
+		}
+		fclose($probe);
+		return $delivered;
 	}
 
 	public function testClosesAConnectionThatOpensWithTls() : void{

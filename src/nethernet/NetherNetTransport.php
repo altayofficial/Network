@@ -128,7 +128,10 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	private const STALL_THRESHOLD = 0.1;
 
 	private ?\Socket $socket = null;
-	private ?SocketServer $endpointSocket = null;
+	/** @var SocketServer[] */
+	private array $endpointSockets = [];
+	/** @var string[] */
+	private array $extraEndpointAddresses = [];
 	private ?TransportListener $listener = null;
 	private ?ServerIdentity $identity = null;
 	private bool $running = false;
@@ -227,6 +230,18 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 		$this->udpPortRequired = $required;
 	}
 
+	/**
+	 * Serves the join endpoint on one more address, usually an IPv6 one next to the IPv4 bind,
+	 * since a socket only ever listens on one address family. When ICE is limited to the bound
+	 * address, this one's host is gathered on too. Has to be called before start().
+	 */
+	public function addEndpointAddress(string $address) : void{
+		if($this->running){
+			throw new TransportException("Endpoint addresses cannot change while the transport is running");
+		}
+		$this->extraEndpointAddresses[] = $address;
+	}
+
 	public function setCredentials(?Credentials $credentials) : void{
 		$this->signallingCredentials = $credentials;
 	}
@@ -278,7 +293,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			throw new TransportException("NetherNet transport is already running");
 		}
 		$this->socket = $this->createDiscoverySocket();
-		if($this->socket === null && $this->endpointAddress === null){
+		if($this->socket === null && $this->endpointAddress === null && $this->extraEndpointAddresses === []){
 			throw new TransportException("NetherNet transport has no way to receive signalling: discovery is unavailable and no endpoint is configured");
 		}
 		try{
@@ -311,8 +326,18 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			$this->logger->info("NetherNet transport listening for discovery on $this->bindAddress:$this->port");
 		}
 
+		$endpointAddresses = $this->extraEndpointAddresses;
 		if($this->endpointAddress !== null){
-			$this->startEndpoint($this->endpointAddress);
+			array_unshift($endpointAddresses, $this->endpointAddress);
+		}
+		try{
+			foreach($endpointAddresses as $address){
+				$this->startEndpoint($address);
+			}
+		}catch(TransportException $e){
+			//hmm, half a set of listeners is worse than none, the operator asked for all of them
+			$this->closeEndpoints();
+			throw $e;
 		}
 	}
 
@@ -393,8 +418,11 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	 * @throws TransportException
 	 */
 	private function startEndpoint(string $address) : void{
+		//wait, Linux opens [::] dual stack, so it would also claim the IPv4 port the other listener
+		//already holds. IPv4 has its own socket here, so the IPv6 one only takes IPv6
+		$context = str_starts_with($address, "[") ? ["tcp" => ["ipv6_v6only" => true]] : [];
 		try{
-			$socket = new SocketServer($address);
+			$socket = new SocketServer($address, $context);
 		}catch(\RuntimeException | \InvalidArgumentException $e){
 			throw new TransportException("Failed to bind endpoint signalling socket to $address: " . $e->getMessage(), 0, $e);
 		}
@@ -409,7 +437,14 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 			$this->logger->debug("Endpoint signalling error: " . $e->getMessage());
 		});
 		$server->listen(new SignallingServer($socket, $this->tlsContext()));
-		$this->endpointSocket = $socket;
+		$this->endpointSockets[] = $socket;
+	}
+
+	private function closeEndpoints() : void{
+		foreach($this->endpointSockets as $socket){
+			$socket->close();
+		}
+		$this->endpointSockets = [];
 	}
 
 	/**
@@ -634,10 +669,7 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	}
 
 	public function shutdown() : void{
-		if($this->endpointSocket !== null){
-			$this->endpointSocket->close();
-			$this->endpointSocket = null;
-		}
+		$this->closeEndpoints();
 		foreach($this->sessions as $session){
 			$session->disconnect();
 		}
@@ -1461,7 +1493,24 @@ final class NetherNetTransport implements NameableTransport, AddressBlockingTran
 	}
 
 	private function boundInterface() : array{
-		return in_array($this->bindAddress, ["", "0.0.0.0", "::", "[::]"], true) ? [] : [$this->bindAddress];
+		if(self::isWildcard($this->bindAddress)){
+			return [];
+		}
+		$interfaces = [$this->bindAddress];
+		foreach($this->extraEndpointAddresses as $address){
+			$colon = strrpos($address, ":");
+			$host = trim($colon === false ? $address : substr($address, 0, $colon), "[]");
+			if(self::isWildcard($host)){
+				//yeah, one family on every address means ICE can't be narrowed down to a list anymore
+				return [];
+			}
+			$interfaces[] = $host;
+		}
+		return $interfaces;
+	}
+
+	private static function isWildcard(string $address) : bool{
+		return in_array($address, ["", "0.0.0.0", "::", "[::]"], true);
 	}
 
 	/**
