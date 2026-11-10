@@ -34,6 +34,13 @@ final class DiscoveryCodec{
 	private const CHECKSUM_LENGTH = 32;
 	private const HEADER_PADDING = 8;
 	private const CIPHER_BLOCK_LENGTH = 16;
+	/**
+	 * BDS 1.26.70.23 and later send their signals inside this, a sequenced envelope holding a whole
+	 * second packet without the crypto around it
+	 */
+	private const ENVELOPE_ID = 0x03;
+	/** Recipient, a value that stays fixed per sender, and the sequence number */
+	private const ENVELOPE_HEADER_LENGTH = 24;
 	/** The longest a payload is declared, by clients and BDS alike: a signal's longest behind its header */
 	private const MAX_DECLARED_LENGTH = 1172;
 	/**
@@ -121,6 +128,20 @@ final class DiscoveryCodec{
 			$packetId = $in->getLShort();
 			$senderId = $in->getLLong();
 			$in->get(self::HEADER_PADDING);
+
+			if($packetId === self::ENVELOPE_ID){
+				//hmm, BDS resends these until something acks them, and nobody knows what that ack looks
+				//like yet. Answering the signal inside is enough to connect, the repeats just die out
+				$in->get(self::ENVELOPE_HEADER_LENGTH);
+				$in->getLShort();
+				$packetId = $in->getLShort();
+				$senderId = $in->getLLong();
+				$in->get(self::HEADER_PADDING);
+				if($packetId === self::ENVELOPE_ID){
+					$reason = "nests one envelope inside another";
+					return null;
+				}
+			}
 
 			$packet = match($packetId){
 				DiscoveryRequestPacket::ID => new DiscoveryRequestPacket(),
