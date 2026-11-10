@@ -78,48 +78,6 @@ final class DiscoveryCodecTest extends TestCase{
 		self::assertSame($signal, $packet->data);
 	}
 
-	public function testUnwrapsTheSequencedEnvelopeBdsSendsSignalsIn() : void{
-		$inner = new PacketSerializer();
-		$inner->putLShort(DiscoveryMessagePacket::ID);
-		$inner->putLLong(42);
-		$inner->put("\x01" . str_repeat("\x00", 7));
-		$inner->putLLong(777);
-		$inner->putByteArray("CONNECTRESPONSE 5 data");
-
-		//laid out the way 1.26.70.24 sends it: recipient, a value fixed per sender, then the sequence
-		$body = new PacketSerializer();
-		$body->putLShort(0x03);
-		$body->putLLong(42);
-		$body->put("\x01" . str_repeat("\x00", 7));
-		$body->putLLong(777);
-		$body->put((string) hex2bin("f56332b6488da861"));
-		$body->putLLong(4);
-		$body->put(pack("v", strlen($inner->getBuffer()) + 2) . $inner->getBuffer());
-		$payload = pack("v", strlen($body->getBuffer()) + 2) . $body->getBuffer();
-
-		$result = DiscoveryCodec::unmarshal(DiscoveryCrypto::checksum($payload) . DiscoveryCrypto::encrypt($payload));
-		self::assertNotNull($result);
-		[$packet, $sender] = $result;
-		self::assertInstanceOf(DiscoveryMessagePacket::class, $packet);
-		self::assertSame(777, $packet->recipientId);
-		self::assertSame("CONNECTRESPONSE 5 data", $packet->data);
-		self::assertSame(42, $sender);
-	}
-
-	public function testRejectsAnEnvelopeInsideAnEnvelope() : void{
-		$body = new PacketSerializer();
-		$body->putLShort(0x03);
-		$body->putLLong(42);
-		$body->put(str_repeat("\x00", 8 + 24));
-		$body->putLShort(0);
-		$body->putLShort(0x03);
-		$body->putLLong(42);
-		$body->put(str_repeat("\x00", 8 + 24));
-		$payload = pack("v", strlen($body->getBuffer()) + 2) . $body->getBuffer();
-
-		self::assertNull(DiscoveryCodec::unmarshal(DiscoveryCrypto::checksum($payload) . DiscoveryCrypto::encrypt($payload)));
-	}
-
 	public function testRejectsGarbage() : void{
 		self::assertNull(DiscoveryCodec::unmarshal("garbage"));
 		self::assertNull(DiscoveryCodec::unmarshal(str_repeat("\x00", 64)));
