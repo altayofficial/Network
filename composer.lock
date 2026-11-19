@@ -49,8 +49,7 @@
                 "issues": "https://github.com/altayofficial/BinaryUtils/issues",
                 "source": "https://github.com/altayofficial/BinaryUtils/tree/0.2.8"
             },
-            "time": "2026-11-19T10:32:29+00:00",
-            "published-time": "2026-11-19T10:38:52+00:00"
+            "time": "2026-11-19T10:32:29+00:00"
         },
         {
             "name": "altayofficial/log",
@@ -94,8 +93,7 @@
                 "issues": "https://github.com/altayofficial/Log/issues",
                 "source": "https://github.com/altayofficial/Log/tree/0.4.1"
             },
-            "time": "2026-11-19T10:32:30+00:00",
-            "published-time": "2026-11-19T10:38:42+00:00"
+            "time": "2026-11-19T10:32:30+00:00"
         },
         {
             "name": "psr/log",
@@ -739,11 +737,11 @@
         },
         {
             "name": "phpstan/phpstan",
-            "version": "2.2.14",
+            "version": "2.3.6",
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/9c672e7a8e791dfc3d30e55f683e73fc0b63a3ac",
-                "reference": "9c672e7a8e791dfc3d30e55f683e73fc0b63a3ac",
+                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/00cedebb76cc82c1592414fa4f616cefdccda16f",
+                "reference": "00cedebb76cc82c1592414fa4f616cefdccda16f",
                 "shasum": ""
             },
             "require": {
@@ -799,7 +797,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-09-12T21:39:33+00:00"
+            "time": "2026-11-15T19:58:26+00:00"
         },
         {
             "name": "phpunit/php-code-coverage",
@@ -3147,5 +3145,5 @@
     "platform-overrides": {
         "php": "8.1.0"
     },
-    "plugin-api-version": "2.11.0"
+    "plugin-api-version": "2.9.0"
 }
