@@ -4,25 +4,28 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "f9def93a6e14ec8ea49e9eb5a2f6b330",
+    "content-hash": "506d94e93ea18c4ebcaa53caba922a0a",
     "packages": [
         {
-            "name": "pocketmine/binaryutils",
-            "version": "0.2.7",
+            "name": "altayofficial/binaryutils",
+            "version": "0.2.8",
             "source": {
                 "type": "git",
-                "url": "https://github.com/pmmp/BinaryUtils.git",
-                "reference": "14c044afa33cb581b4a6d1ea04a87e0bc99e824b"
+                "url": "https://github.com/altayofficial/BinaryUtils.git",
+                "reference": "3d6b8db70c87bcfcf6663c064cd811e60d060322"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/pmmp/BinaryUtils/zipball/14c044afa33cb581b4a6d1ea04a87e0bc99e824b",
-                "reference": "14c044afa33cb581b4a6d1ea04a87e0bc99e824b",
+                "url": "https://api.github.com/repos/altayofficial/BinaryUtils/zipball/3d6b8db70c87bcfcf6663c064cd811e60d060322",
+                "reference": "3d6b8db70c87bcfcf6663c064cd811e60d060322",
                 "shasum": ""
             },
             "require": {
                 "php": "^7.4 || ^8.0",
                 "php-64bit": "*"
+            },
+            "replace": {
+                "pocketmine/binaryutils": "self.version"
             },
             "require-dev": {
                 "phpstan/extension-installer": "^1.0",
@@ -43,24 +46,24 @@
             ],
             "description": "Classes and methods for conveniently handling binary data",
             "support": {
-                "issues": "https://github.com/pmmp/BinaryUtils/issues",
-                "source": "https://github.com/pmmp/BinaryUtils/tree/0.2.7"
+                "issues": "https://github.com/altayofficial/BinaryUtils/issues",
+                "source": "https://github.com/altayofficial/BinaryUtils/tree/0.2.8"
             },
-            "abandoned": true,
-            "time": "2025-12-24T04:20:35+00:00"
+            "time": "2026-11-19T10:32:29+00:00",
+            "published-time": "2026-11-19T10:38:52+00:00"
         },
         {
-            "name": "pocketmine/log",
-            "version": "0.4.0",
+            "name": "altayofficial/log",
+            "version": "0.4.1",
             "source": {
                 "type": "git",
-                "url": "https://github.com/pmmp/Log.git",
-                "reference": "e6c912c0f9055c81d23108ec2d179b96f404c043"
+                "url": "https://github.com/altayofficial/Log.git",
+                "reference": "35ed6bcbf06580afc29049906f842ab70607595e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/pmmp/Log/zipball/e6c912c0f9055c81d23108ec2d179b96f404c043",
-                "reference": "e6c912c0f9055c81d23108ec2d179b96f404c043",
+                "url": "https://api.github.com/repos/altayofficial/Log/zipball/35ed6bcbf06580afc29049906f842ab70607595e",
+                "reference": "35ed6bcbf06580afc29049906f842ab70607595e",
                 "shasum": ""
             },
             "require": {
@@ -69,9 +72,12 @@
             "conflict": {
                 "pocketmine/spl": "<0.4"
             },
+            "replace": {
+                "pocketmine/log": "self.version"
+            },
             "require-dev": {
-                "phpstan/phpstan": "0.12.88",
-                "phpstan/phpstan-strict-rules": "^0.12.2"
+                "phpstan/phpstan": "2.1.33",
+                "phpstan/phpstan-strict-rules": "^2.0.0"
             },
             "type": "library",
             "autoload": {
@@ -85,11 +91,11 @@
             ],
             "description": "Logging components used by PocketMine-MP and related projects",
             "support": {
-                "issues": "https://github.com/pmmp/Log/issues",
-                "source": "https://github.com/pmmp/Log/tree/0.4.0"
+                "issues": "https://github.com/altayofficial/Log/issues",
+                "source": "https://github.com/altayofficial/Log/tree/0.4.1"
             },
-            "abandoned": true,
-            "time": "2021-06-18T19:08:09+00:00"
+            "time": "2026-11-19T10:32:30+00:00",
+            "published-time": "2026-11-19T10:38:42+00:00"
         },
         {
             "name": "psr/log",
@@ -3141,5 +3147,5 @@
     "platform-overrides": {
         "php": "8.1.0"
     },
-    "plugin-api-version": "2.9.0"
+    "plugin-api-version": "2.11.0"
 }

@@ -8,8 +8,8 @@
     "ext-sockets": "*",
     "ext-openssl": "*",
     "ext-gmp": "*",
-    "pocketmine/binaryutils": "^0.2.6",
-    "pocketmine/log": "^0.4.0",
+    "altayofficial/binaryutils": "^0.2.8",
+    "altayofficial/log": "^0.4.1",
     "psr/log": "^3.0",
     "react/event-loop": "^1.5"
   },
