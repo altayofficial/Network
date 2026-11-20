@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "506d94e93ea18c4ebcaa53caba922a0a",
+    "content-hash": "db9fcb002c7f69978a140679870cfbc3",
     "packages": [
         {
             "name": "altayofficial/binaryutils",
@@ -261,16 +261,16 @@
         },
         {
             "name": "altayofficial/webrtc",
-            "version": "1.9.3",
+            "version": "1.9.4",
             "source": {
                 "type": "git",
                 "url": "https://github.com/altayofficial/webrtc.git",
-                "reference": "03a74cec6923ce97b906aaf83a61710fc93c66ea"
+                "reference": "7557af09c497fc5f361601b59084dcf36dd53d6b"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/altayofficial/webrtc/zipball/03a74cec6923ce97b906aaf83a61710fc93c66ea",
-                "reference": "03a74cec6923ce97b906aaf83a61710fc93c66ea",
+                "url": "https://api.github.com/repos/altayofficial/webrtc/zipball/7557af09c497fc5f361601b59084dcf36dd53d6b",
+                "reference": "7557af09c497fc5f361601b59084dcf36dd53d6b",
                 "shasum": ""
             },
             "require": {
@@ -333,9 +333,10 @@
             "description": "A WebRTC library designed special for Altay family",
             "support": {
                 "issues": "https://github.com/altayofficial/webrtc/issues",
-                "source": "https://github.com/altayofficial/webrtc/tree/1.9.3"
+                "source": "https://github.com/altayofficial/webrtc/tree/1.9.4"
             },
-            "time": "2026-11-15T21:40:08+00:00"
+            "time": "2026-11-20T12:34:59+00:00",
+            "published-time": "2026-11-20T12:37:08+00:00"
         },
         {
             "name": "brick/math",
@@ -3148,5 +3149,5 @@
     "platform-overrides": {
         "php": "8.1.0"
     },
-    "plugin-api-version": "2.9.0"
+    "plugin-api-version": "2.11.0"
 }
